@@ -75,9 +75,6 @@ def create_romanian_video(romanian_script, progress_callback=None):
     audio_clip = None
     
     try:
-        if progress_callback:
-            yield from progress_callback("Starting video creation...|0")
-        
         # Retrieve your ElevenLabs API key from an environment variable
         ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
         if not ELEVENLABS_API_KEY:

@@ -41,99 +41,178 @@ def create_video():
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>Create Romanian Video</title>
             <style>
+                :root {
+                    --primary-color: #4f46e5;
+                    --primary-hover: #4338ca;
+                    --success-color: #22c55e;
+                    --success-hover: #16a34a;
+                    --error-color: #ef4444;
+                    --background: #f9fafb;
+                    --card-bg: #ffffff;
+                    --text-primary: #111827;
+                    --text-secondary: #6b7280;
+                }
+
                 body {
                     display: flex;
                     justify-content: center;
                     align-items: center;
-                    height: 100vh;
+                    min-height: 100vh;
                     margin: 0;
-                    font-family: Arial, sans-serif;
-                    background-color: #f0f0f0;
+                    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: var(--text-primary);
+                    line-height: 1.5;
                 }
+
                 .container {
-                    background-color: #fff;
-                    padding: 20px;
-                    border-radius: 8px;
-                    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-                    text-align: center;
-                    width: 80%;
-                    max-width: 500px;
+                    background-color: var(--card-bg);
+                    padding: 2rem;
+                    border-radius: 1rem;
+                    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+                    width: 90%;
+                    max-width: 600px;
+                    margin: 2rem;
+                    backdrop-filter: blur(10px);
                 }
+
+                h1 {
+                    font-size: 1.875rem;
+                    font-weight: 700;
+                    margin-bottom: 1.5rem;
+                    color: var(--text-primary);
+                }
+
                 textarea {
                     width: 100%;
-                    margin-bottom: 10px;
-                    border-radius: 4px;
-                    border: 1px solid #ccc;
+                    margin-bottom: 1rem;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.5rem;
+                    font-size: 1rem;
+                    transition: border-color 0.15s ease-in-out;
+                    resize: vertical;
+                    padding: 0.75rem;
+                    box-sizing: border-box;
                 }
+
+                textarea:focus {
+                    outline: none;
+                    border-color: var(--primary-color);
+                    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+                }
+
+                .file-input {
+                    margin-bottom: 1.5rem;
+                }
+
+                .file-input-label {
+                    display: block;
+                    font-weight: 500;
+                    margin-bottom: 0.5rem;
+                    color: var(--text-secondary);
+                }
+
+                input[type="file"] {
+                    width: 100%;
+                    padding: 0.5rem;
+                    border: 1px dashed #e5e7eb;
+                    border-radius: 0.5rem;
+                    background-color: #f9fafb;
+                    box-sizing: border-box;
+                }
+
                 input[type="submit"] {
-                    background-color: #007bff;
+                    background-color: var(--primary-color);
                     color: white;
-                    padding: 10px 20px;
+                    padding: 0.75rem 1.5rem;
                     border: none;
-                    border-radius: 4px;
+                    border-radius: 0.5rem;
+                    font-weight: 500;
                     cursor: pointer;
+                    transition: background-color 0.15s ease-in-out;
+                    width: 100%;
                 }
+
                 input[type="submit"]:hover {
-                    background-color: #0056b3;
+                    background-color: var(--primary-hover);
                 }
-                .success-message {
-                    color: #28a745;
-                    margin-top: 15px;
-                    font-weight: bold;
-                }
-                .error-message {
-                    color: #dc3545;
-                    margin-top: 15px;
-                    font-weight: bold;
-                }
-                .download-btn {
-                    display: none;
-                    background-color: #28a745;
-                    color: white;
-                    padding: 10px 20px;
-                    border: none;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    margin-top: 15px;
-                    text-decoration: none;
-                }
-                .download-btn:hover {
-                    background-color: #218838;
-                }
-                #progress {
-                    margin-top: 20px;
-                    font-size: 14px;
-                    color: #555;
-                    text-align: left;
-                    padding: 10px;
-                    background-color: #f8f9fa;
-                    border-radius: 4px;
-                    display: none;
-                    max-height: 200px;
-                    overflow-y: auto;
-                }
+
                 .progress-bar {
                     width: 100%;
-                    height: 20px;
-                    background-color: #f0f0f0;
-                    border-radius: 10px;
-                    margin: 10px 0;
+                    height: 0.5rem;
+                    background-color: #e5e7eb;
+                    border-radius: 1rem;
+                    margin: 1.5rem 0;
                     overflow: hidden;
                     display: none;
                 }
+
                 .progress-bar-fill {
                     height: 100%;
-                    background-color: #007bff;
+                    background-color: var(--primary-color);
                     width: 0%;
-                    transition: width 0.5s ease-in-out;
+                    transition: width 0.3s ease-in-out;
                 }
-                .file-input {
-                    margin-bottom: 15px;
+
+                #progress {
+                    margin-top: 1.5rem;
+                    font-size: 0.875rem;
+                    color: var(--text-secondary);
+                    background-color: #f8fafc;
+                    border-radius: 0.5rem;
+                    padding: 1rem;
+                    display: none;
+                    max-height: 200px;
+                    overflow-y: auto;
+                    border: 1px solid #e5e7eb;
                 }
-                .file-input-label {
-                    display: block;
-                    margin-bottom: 5px;
-                    color: #555;
+
+                .success-message {
+                    color: var(--success-color);
+                    font-weight: 500;
+                }
+
+                .error-message {
+                    color: var(--error-color);
+                    font-weight: 500;
+                }
+
+                .download-btn {
+                    display: none;
+                    background-color: var(--success-color);
+                    color: white;
+                    padding: 0.75rem 1.5rem;
+                    border: none;
+                    border-radius: 0.5rem;
+                    font-weight: 500;
+                    cursor: pointer;
+                    text-decoration: none;
+                    text-align: center;
+                    margin-top: 1rem;
+                    transition: background-color 0.15s ease-in-out;
+                }
+
+                .download-btn:hover {
+                    background-color: var(--success-hover);
+                }
+
+                /* Add smooth scrollbar for progress div */
+                #progress::-webkit-scrollbar {
+                    width: 8px;
+                }
+
+                #progress::-webkit-scrollbar-track {
+                    background: #f1f1f1;
+                    border-radius: 4px;
+                }
+
+                #progress::-webkit-scrollbar-thumb {
+                    background: #cbd5e1;
+                    border-radius: 4px;
+                }
+
+                #progress::-webkit-scrollbar-thumb:hover {
+                    background: #94a3b8;
                 }
             </style>
         </head>
