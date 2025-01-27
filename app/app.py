@@ -1,12 +1,15 @@
 # app.py
 from dotenv import load_dotenv
 import os
+from flask import after_this_request, current_app
+import time
+import threading
 
 # Load environment variables from .env file
 load_dotenv()
 
 from flask import Flask, request, render_template_string, jsonify, send_file, Response
-from video_creator import create_romanian_video
+from video_creator import create_romanian_video, cleanup_broll
 
 app = Flask(__name__)
 
@@ -124,12 +127,24 @@ def create_video():
                     width: 0%;
                     transition: width 0.5s ease-in-out;
                 }
+                .file-input {
+                    margin-bottom: 15px;
+                }
+                .file-input-label {
+                    display: block;
+                    margin-bottom: 5px;
+                    color: #555;
+                }
             </style>
         </head>
         <body>
             <div class="container">
                 <h1>Create Romanian Video</h1>
-                <form method="post" id="videoForm">
+                <form method="post" id="videoForm" enctype="multipart/form-data">
+                    <div class="file-input">
+                        <label class="file-input-label">Upload B-roll Video (MP4 format)</label>
+                        <input type="file" name="broll" accept="video/mp4" required>
+                    </div>
                     <textarea name="script" rows="10" cols="30" placeholder="Enter Romanian script here..." required></textarea><br>
                     <input type="submit" value="Create Video">
                 </form>
@@ -140,58 +155,152 @@ def create_video():
                 <a href="/download" id="downloadBtn" class="download-btn">Download Video</a>
             </div>
             <script>
-    document.getElementById('videoForm').onsubmit = function(event) {
-        event.preventDefault();
-        const form = event.target;
-        const progressDiv = document.getElementById('progress');
-        const progressBar = document.querySelector('.progress-bar');
-        const progressBarFill = document.querySelector('.progress-bar-fill');
-        const downloadBtn = document.getElementById('downloadBtn');
+                document.getElementById('videoForm').onsubmit = function(event) {
+                    event.preventDefault();
+                    const form = event.target;
+                    const progressDiv = document.getElementById('progress');
+                    const progressBar = document.querySelector('.progress-bar');
+                    const progressBarFill = document.querySelector('.progress-bar-fill');
+                    const downloadBtn = document.getElementById('downloadBtn');
 
-        // Reset and show progress elements
-        progressDiv.style.display = 'block';
-        progressBar.style.display = 'block';
-        progressDiv.innerHTML = '';
-        progressBarFill.style.width = '0%';
-        downloadBtn.style.display = 'none';
+                    // Reset and show progress elements
+                    progressDiv.style.display = 'block';
+                    progressBar.style.display = 'block';
+                    progressDiv.innerHTML = '';
+                    progressBarFill.style.width = '0%';
+                    downloadBtn.style.display = 'none';
 
-        const script = form.querySelector('textarea[name="script"]').value;
-        const eventSource = new EventSource(`/progress?script=${encodeURIComponent(script)}`);
+                    // Create FormData object to handle file upload
+                    const formData = new FormData(form);
+                    
+                    // Upload the file first
+                    fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Start SSE connection after successful upload
+                            const script = form.querySelector('textarea[name="script"]').value;
+                            const eventSource = new EventSource(`/progress?script=${encodeURIComponent(script)}`);
+                            
+                            eventSource.onmessage = function(event) {
+                                if (event.data === 'DONE') {
+                                    eventSource.close();
+                                    downloadBtn.style.display = 'inline-block';
+                                    progressDiv.innerHTML += '<br><span class="success-message">Video created successfully!</span>';
+                                    progressBarFill.style.width = '100%';
+                                } else if (event.data.startsWith('ERROR:')) {
+                                    eventSource.close();
+                                    progressDiv.innerHTML += '<br><span class="error-message">' + event.data.substring(7) + '</span>';
+                                } else {
+                                    const [message, percentage] = event.data.split('|');
+                                    if (percentage) {
+                                        progressBarFill.style.width = percentage + '%';
+                                    }
+                                    progressDiv.innerHTML += message + '<br>';
+                                    progressDiv.scrollTop = progressDiv.scrollHeight;
+                                }
+                            };
 
-        eventSource.onmessage = function(event) {
-            if (event.data === 'DONE') {
-                eventSource.close();
-                downloadBtn.style.display = 'inline-block';
-                progressDiv.innerHTML += '<br><span class="success-message">Video created successfully!</span>';
-                progressBarFill.style.width = '100%';
-            } else if (event.data.startsWith('ERROR:')) {
-                eventSource.close();
-                progressDiv.innerHTML += '<br><span class="error-message">' + event.data.substring(7) + '</span>';
-            } else {
-                const [message, percentage] = event.data.split('|');
-                if (percentage) {
-                    progressBarFill.style.width = percentage + '%';
-                }
-                progressDiv.innerHTML += message + '<br>';
-                progressDiv.scrollTop = progressDiv.scrollHeight;
-            }
-        };
-
-        eventSource.onerror = function() {
-            eventSource.close();
-            progressDiv.innerHTML += '<br><span class="error-message">Connection lost</span>';
-        };
-    };
-</script>
+                            eventSource.onerror = function() {
+                                eventSource.close();
+                                progressDiv.innerHTML += '<br><span class="error-message">Connection lost</span>';
+                            };
+                        } else {
+                            progressDiv.innerHTML += '<br><span class="error-message">' + data.error + '</span>';
+                        }
+                    })
+                    .catch(error => {
+                        progressDiv.innerHTML += '<br><span class="error-message">Upload failed: ' + error.message + '</span>';
+                    });
+                };
+            </script>
         </body>
         </html>
     ''')
 
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'broll' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'})
+    
+    file = request.files['broll']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'})
+    
+    if file:
+        # Save the uploaded file
+        upload_path = os.path.join(app.root_path, 'uploads')
+        os.makedirs(upload_path, exist_ok=True)
+        file_path = os.path.join(upload_path, 'uploaded_broll.mp4')
+        file.save(file_path)
+        return jsonify({'success': True})
+    
+    return jsonify({'success': False, 'error': 'File upload failed'})
+
+def delayed_cleanup(file_path, delay=5):
+    """Attempt to delete a file after a delay with multiple retries."""
+    def cleanup():
+        with app.app_context():
+            # First delay to let initial processes finish
+            time.sleep(delay)
+            
+            # Try up to 3 times with increasing delays
+            for attempt in range(3):
+                try:
+                    if os.path.exists(file_path):
+                        # Force Python to release any handles it might have
+                        import gc
+                        gc.collect()
+                        
+                        # On Windows, try to force close any handles
+                        if os.name == 'nt':
+                            try:
+                                import psutil
+                                for proc in psutil.process_iter(['pid', 'open_files']):
+                                    try:
+                                        for file in proc.open_files():
+                                            if file.path == os.path.abspath(file_path):
+                                                current_app.logger.info(f"Found process {proc.pid} holding file handle")
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                        pass
+                            except ImportError:
+                                pass
+                        
+                        os.remove(file_path)
+                        current_app.logger.info(f"File {file_path} cleaned up successfully on attempt {attempt + 1}")
+                        break
+                    else:
+                        current_app.logger.info(f"File {file_path} already deleted")
+                        break
+                except Exception as e:
+                    current_app.logger.error(f"Cleanup attempt {attempt + 1} failed for {file_path}: {e}")
+                    time.sleep(delay * (attempt + 1))  # Increase delay with each attempt
+
+    threading.Thread(target=cleanup).start()
+
 @app.route('/download')
 def download_video():
     try:
-        return send_file('final_video_with_subs.mp4', as_attachment=True)
+        video_path = 'final_video_with_subs.mp4'
+        if not os.path.exists(video_path):
+            return "Video file not found", 404
+
+        @after_this_request
+        def cleanup(response):
+            current_app.logger.info("Starting cleanup after download...")
+            
+            # Schedule delayed cleanup for both files
+            delayed_cleanup('uploads/uploaded_broll.mp4')  # Ensure B-roll is cleaned up
+            delayed_cleanup(video_path)  # Ensure final video is cleaned up
+            
+            return response
+
+        return send_file(video_path, as_attachment=True)
     except Exception as e:
+        current_app.logger.error(f"Download error: {e}")
         return str(e), 404
 
 if __name__ == '__main__':

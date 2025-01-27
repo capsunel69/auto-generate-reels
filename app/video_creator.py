@@ -65,6 +65,15 @@ class SSELogger(ProgressBarLogger):
                     self.sse_callback(f"Rendering video - Processing frames ({percent:.0f}%)")
 
 def create_romanian_video(romanian_script, progress_callback=None):
+    """
+    Generates the final video with Romanian script, audio, 
+    and subtitles. Returns True if successful.
+    """
+    parkour_video = None
+    clip = None
+    final_clip = None
+    audio_clip = None
+    
     try:
         if progress_callback:
             yield from progress_callback("Starting video creation...|0")
@@ -183,8 +192,12 @@ def create_romanian_video(romanian_script, progress_callback=None):
         audio_clip = AudioFileClip("audio_file.mp3")
         total_duration = audio_clip.duration
 
-        # Use a single segment from parkour.mp4
-        parkour_video = VideoFileClip("src/parkour-v2.mp4").without_audio()
+        # Use uploaded video if available, otherwise fall back to default
+        broll_path = "uploads/uploaded_broll.mp4"
+        if not os.path.exists(broll_path):
+            broll_path = "src/placeholder-broll.mp4"
+
+        parkour_video = VideoFileClip(broll_path).without_audio()
         parkour_duration = parkour_video.duration
 
         # Ensure the clip duration doesn't exceed its actual frames
@@ -243,21 +256,60 @@ def create_romanian_video(romanian_script, progress_callback=None):
             if os.path.exists(final_output):
                 os.remove(output_filename)  # Remove the non-subtitled version
                 os.remove(ass_file)  # Remove the temporary subtitle file
-                print("Temporary files cleaned up successfully")
+                os.remove("audio_file.mp3")  # Remove the temporary audio file
+                os.remove("sub_file.srt")  # Remove the temporary subtitle file
 
+        # Let the user see the "download" button
+        # we pass 100% progress so the user knows we are finished
         if progress_callback:
-            yield from progress_callback("Video creation complete!|100")
+            yield from progress_callback("Video creation complete! |100")
         print("Video creation complete!")
-        
-        # Clean up temporary files
-        parkour_video.close()
-        clip.close()
-        
+
+        # Clean up the clip resources before returning
+        if parkour_video:
+            parkour_video.close()
+        if clip:
+            clip.close()
+        if final_clip:
+            final_clip.close()
+        if audio_clip:
+            audio_clip.close()
+
+        # Optional small delay for Windows to release file handles
+        time.sleep(1)
+
         return True
         
     except Exception as e:
         print(f"Error creating video: {str(e)}")
         raise e
+
+    finally:
+        # Ensure all resources are closed in the finally block
+        try:
+            if parkour_video:
+                parkour_video.close()
+        except:
+            pass
+        try:
+            if clip:
+                clip.close()
+        except:
+            pass
+        try:
+            if final_clip:
+                final_clip.close()
+        except:
+            pass
+        try:
+            if audio_clip:
+                audio_clip.close()
+        except:
+            pass
+        
+        # Force garbage collection to release file handles
+        import gc
+        gc.collect()
 
 def create_subtitle_clips(srt_file, videosize):
     """Convert SRT to ASS and create styled subtitles"""
@@ -310,6 +362,28 @@ def create_styled_subtitles(video_input, ass_file):
     os.system(f'ffmpeg -y -i {video_input} -vf "ass={ass_file}" -max_interleave_delta 0 -strict -2 -c:a copy {output_filename}')
     print(f"Video with styled subtitles created as {output_filename}")
     return output_filename
+
+def cleanup_broll():
+    """
+    Manually called after user has finished downloading or viewing
+    the final video. This tries to delete the uploaded b-roll.
+    """
+    print("Attempting to clean up b-roll...")
+    broll_path = "uploads/uploaded_broll.mp4"
+    
+    if os.path.exists(broll_path):
+        # Try multiple times with delays
+        for attempt in range(3):
+            try:
+                time.sleep(2)  # Wait for file handles to be released
+                os.remove(broll_path)
+                print("Uploaded b-roll cleaned up successfully")
+                break
+            except Exception as e:
+                if attempt == 2:  # Only print error on last attempt
+                    print(f"Warning: Could not delete uploaded b-roll: {str(e)}")
+    else:
+        print("No b-roll file found to clean up")
 
 if __name__ == "__main__":
     create_romanian_video()
