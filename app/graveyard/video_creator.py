@@ -1,3 +1,9 @@
+## This is the old video creator. It is not used anymore.
+## It is kept here for reference.
+## It is not used in the current version of the app.
+## In this (still working) version, we use the Whisper API to generate subtitles
+## The main issue with whisper was that it was not able to generate subtitles word-for-word
+## So we used Google Cloud Speech-to-Text to generate the subtitles
 import openai
 import requests
 import os
@@ -10,39 +16,23 @@ import random
 from elevenlabs import ElevenLabs
 from proglog import ProgressBarLogger
 from openai import OpenAI
-from google.cloud import speech_v1
-from google.cloud import storage
-from pydub import AudioSegment
-import io
-import wave
-
-# Set the path to your Google Cloud credentials JSON file
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'dogwood-boulder-392113-d8917a17686f.json'
 
 def format_timestamp(seconds):
     """Convert seconds to SRT timestamp format"""
-    if isinstance(seconds, (int, float)):
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = seconds % 60
-        milliseconds = int((secs % 1) * 1000)
-        secs = int(secs)
-    else:  # Handle timedelta objects
-        hours = seconds.seconds // 3600
-        minutes = (seconds.seconds % 3600) // 60
-        secs = seconds.seconds % 60
-        milliseconds = seconds.microseconds // 1000
-    
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    seconds = seconds % 60
+    milliseconds = int((seconds % 1) * 1000)
+    seconds = int(seconds)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
 
 def timestamp_to_seconds(timestamp):
     """Convert SRT timestamp to seconds"""
-    # Split into time and milliseconds parts
+    # Remove milliseconds
     time_parts, milliseconds = timestamp.split(',')
     hours, minutes, seconds = map(int, time_parts.split(':'))
-    # Convert everything to seconds
-    total_seconds = (hours * 3600) + (minutes * 60) + seconds + (int(milliseconds) / 1000)
-    return float(total_seconds)
+    total_seconds = hours * 3600 + minutes * 60 + seconds + int(milliseconds) / 1000
+    return total_seconds
 
 class SSELogger(ProgressBarLogger):
     """
@@ -79,86 +69,6 @@ class SSELogger(ProgressBarLogger):
                 if total > 0:
                     percent = (current_frame / total) * 100
                     self.sse_callback(f"Rendering video - Processing frames ({percent:.0f}%)")
-
-def get_word_timestamps_from_google(audio_file_path):
-    """Get word-level timestamps using Google Cloud Speech-to-Text"""
-    client = speech_v1.SpeechClient()
-
-    # Convert MP3 to WAV (Google Speech requires WAV format)
-    audio = AudioSegment.from_mp3(audio_file_path)
-    wav_data = io.BytesIO()
-    audio.export(wav_data, format="wav")
-    wav_data.seek(0)
-
-    # Read the audio file
-    content = wav_data.read()
-
-    audio = speech_v1.RecognitionAudio(content=content)
-    config = speech_v1.RecognitionConfig(
-        encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
-        language_code="ro-RO",  # Romanian language code
-        enable_word_time_offsets=True,
-    )
-
-    response = client.recognize(config=config, audio=audio)
-    
-    words_with_times = []
-    for result in response.results:
-        for word in result.alternatives[0].words:
-            # Convert the protobuf Duration objects to seconds
-            start_time = word.start_time.total_seconds()
-            end_time = word.end_time.total_seconds()
-            
-            words_with_times.append({
-                'word': word.word,
-                'start_time': start_time,
-                'end_time': end_time
-            })
-    
-    return words_with_times
-
-def create_grouped_srt(words_with_times, max_words=4):
-    """Create SRT content with grouped words"""
-    srt_content = []
-    current_index = 1
-    current_group = []
-    
-    for word_info in words_with_times:
-        current_group.append(word_info)
-        
-        # Create a new subtitle when we reach max words or find punctuation
-        if (len(current_group) >= max_words or 
-            any(p in word_info['word'] for p in '.!?,:')):
-            
-            start_time = current_group[0]['start_time']
-            end_time = current_group[-1]['end_time']
-            
-            # Add small gap between subtitles if needed
-            if srt_content:
-                last_end_time = timestamp_to_seconds(srt_content[-1].split('\n')[1].split(' --> ')[1])
-                if start_time < last_end_time:
-                    start_time = last_end_time + 0.001
-            
-            srt_entry = f"{current_index}\n"
-            srt_entry += f"{format_timestamp(start_time)} --> {format_timestamp(end_time)}\n"
-            srt_entry += f"{' '.join(w['word'] for w in current_group)}\n\n"
-            
-            srt_content.append(srt_entry)
-            current_index += 1
-            current_group = []
-    
-    # Add any remaining words
-    if current_group:
-        start_time = current_group[0]['start_time']
-        end_time = current_group[-1]['end_time']
-        
-        srt_entry = f"{current_index}\n"
-        srt_entry += f"{format_timestamp(start_time)} --> {format_timestamp(end_time)}\n"
-        srt_entry += f"{' '.join(w['word'] for w in current_group)}\n\n"
-        
-        srt_content.append(srt_entry)
-    
-    return ''.join(srt_content)
 
 def create_romanian_video(romanian_script, progress_callback=None):
     """
@@ -208,17 +118,75 @@ def create_romanian_video(romanian_script, progress_callback=None):
         
         if progress_callback:
             yield from progress_callback("Generating subtitles...|30")
+        # Generate SRT file using Whisper for timing
         print("Generating subtitles...")
+        with open("audio_file.mp3", "rb") as audio_file:
+            try:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    response_format="srt"
+                )
+                # The transcript is already a string, no need to access .text
+            except Exception as e:
+                print(f"OpenAI API Error: {str(e)}")
+                raise
         
-        # Get word-level timestamps from Google Cloud
-        words_with_times = get_word_timestamps_from_google("audio_file.mp3")
+        # Parse the SRT content to get timing
+        srt_lines = transcript.split('\n')
+        last_timestamp = None
+        for line in reversed(srt_lines):
+            if ' --> ' in line:
+                last_timestamp = line.split(' --> ')[1].strip()
+                break
         
-        # Create SRT file with grouped words
-        srt_content = create_grouped_srt(words_with_times, max_words=4)
+        total_duration = timestamp_to_seconds(last_timestamp)
         
+        # Clean and split original script into words, removing empty strings and extra spaces
+        original_words = [word.strip() for word in romanian_script.split() if word.strip()]
+        
+        # Process the words to create SRT segments
+        srt_content = []
+        current_index = 1
+        
+        # Split the original script into natural phrases using punctuation
+        phrases = []
+        current_phrase = []
+        for word in original_words:
+            current_phrase.append(word)
+            if any(p in word for p in '.!?,:'):
+                phrases.append(current_phrase)
+                current_phrase = []
+        if current_phrase:  # Add any remaining words
+            phrases.append(current_phrase)
+        
+        # Calculate timing for each phrase
+        words_per_second = len(original_words) / total_duration
+        
+        for i, phrase in enumerate(phrases):
+            # Calculate approximate start and end times based on word position
+            phrase_start_idx = sum(len(p) for p in phrases[:i])
+            phrase_end_idx = phrase_start_idx + len(phrase)
+            
+            start_time = (phrase_start_idx / len(original_words)) * total_duration
+            end_time = (phrase_end_idx / len(original_words)) * total_duration
+            
+            # Add gap between subtitles
+            if srt_content:
+                prev_timestamp = srt_content[-1].split('\n')[1].split(' --> ')[1]
+                prev_end = timestamp_to_seconds(prev_timestamp)
+                if start_time < prev_end + SUBTITLE_GAP:
+                    start_time = prev_end + SUBTITLE_GAP
+            
+            srt_entry = f"{current_index}\n"
+            srt_entry += f"{format_timestamp(start_time)} --> {format_timestamp(end_time)}\n"
+            srt_entry += f"{' '.join(phrase)}\n\n"
+            srt_content.append(srt_entry)
+            current_index += 1
+
         # Save the processed SRT file
         with open("sub_file.srt", "w", encoding="utf-8") as f:
-            f.write(srt_content)
+            f.write(''.join(srt_content))
 
         if progress_callback:
             yield from progress_callback("Creating video...|50")
@@ -400,16 +368,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     def srt_time_to_ass_time(td):
         """Convert SubRipTime to ASS time format"""
-        total_milliseconds = (td.hours * 3600000 + 
-                            td.minutes * 60000 + 
-                            td.seconds * 1000 + 
-                            td.milliseconds)
-        
-        hours = int(total_milliseconds // 3600000)
-        minutes = int((total_milliseconds % 3600000) // 60000)
-        seconds = int((total_milliseconds % 60000) // 1000)
-        centiseconds = int((total_milliseconds % 1000) // 10)  # Convert to centiseconds for ASS
-        
+        total_seconds = (td.hours * 3600 + td.minutes * 60 + 
+                        td.seconds + td.milliseconds / 1000.0)
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        seconds = int(total_seconds % 60)
+        centiseconds = int((total_seconds * 100) % 100)  # ASS uses centiseconds
         return f"{hours:01d}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
     
     for sub in subs:
@@ -417,6 +381,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end_time = srt_time_to_ass_time(sub.end)
         text = sub.text.replace('\n', '\\N')  # ASS line breaks
         
+        # Added \q1 for alternative wrapping mode and increased margins
         ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(200,200)\\pos(540,1200)\\q1\\w8}}{text}\n"
     
     # Save ASS file
