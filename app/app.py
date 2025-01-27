@@ -1,4 +1,10 @@
 # app.py
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
 from flask import Flask, request, render_template_string, jsonify, send_file, Response
 from video_creator import create_romanian_video
 
@@ -11,6 +17,7 @@ def progress_stream():
     
     def generate():
         def progress_callback(message):
+            # This callback will receive messages from the SSELogger (and other steps)
             yield f"data: {message}\n\n"
         
         try:

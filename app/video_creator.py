@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 import random
 from elevenlabs import ElevenLabs
+from proglog import ProgressBarLogger
+from openai import OpenAI
 
 def format_timestamp(seconds):
     """Convert seconds to SRT timestamp format"""
@@ -26,15 +28,41 @@ def timestamp_to_seconds(timestamp):
     total_seconds = hours * 3600 + minutes * 60 + seconds + int(milliseconds) / 1000
     return total_seconds
 
+class SSELogger(ProgressBarLogger):
+    """
+    Custom logger to capture encoding progress from MoviePy without recursion.
+    """
+    def __init__(self, sse_callback=None):
+        super().__init__()
+        self.sse_callback = sse_callback  # function that sends SSE messages
+
+    def bars_callback(self, bar, attr, value, old_value=None):
+        """
+        Called every time the status of the bars is updated.
+        'bar': e.g. 't' for time progress or 'read_frames'
+        'attr': which attribute is updated (index, total, etc.)
+        'value': new value for that attribute
+        'old_value': old value (if any)
+        """
+        # Only track the main time bar for total progress
+        if bar == 't' and attr == 'index' and self.sse_callback:
+            # Once we know total frames/time, compute approximate percentage
+            if self.bars['t'].total is not None:
+                progress = (value / self.bars['t'].total) * 100
+                self.sse_callback(f"Rendering final video ({progress:.0f}%)")
+
 def create_romanian_video(romanian_script, progress_callback=None):
     try:
         if progress_callback:
             yield from progress_callback("Starting video creation...")
         
-        # Configure ElevenLabs API key
-        ELEVENLABS_API_KEY = "sk_a16d6d29b65b4e71866b7976424e71d2c4ddc0f06791ab27"
+        # Retrieve your ElevenLabs API key from an environment variable
+        ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+        if not ELEVENLABS_API_KEY:
+            raise ValueError("ELEVENLABS_API_KEY is not set in environment variables.")
+        
         VOICE_ID = "SWN0Y4Js5I9UJiF9VqEP"
-        SUBTITLE_GAP = 0.001  # Add a 1ms gap between subtitles
+        SUBTITLE_GAP = 0.001
         
         # Initialize ElevenLabs client
         client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
@@ -55,19 +83,29 @@ def create_romanian_video(romanian_script, progress_callback=None):
                 if isinstance(chunk, bytes):
                     file.write(chunk)
 
-        # Initialize OpenAI client for Whisper (still needed for subtitles)
-        client = openai.OpenAI(api_key="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")
+        # Retrieve your OpenAI API key from an environment variable
+        OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+        if not OPENAI_API_KEY:
+            raise ValueError("OPENAI_API_KEY is not set in environment variables.")
+
+        # Initialize OpenAI client
+        client = OpenAI(api_key=OPENAI_API_KEY)
         
         if progress_callback:
             yield from progress_callback("Generating subtitles...")
         # Generate SRT file using Whisper for timing
         print("Generating subtitles...")
         with open("audio_file.mp3", "rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                response_format="srt"  # Changed to SRT format directly
-            )
+            try:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    response_format="srt"
+                )
+                # The transcript is already a string, no need to access .text
+            except Exception as e:
+                print(f"OpenAI API Error: {str(e)}")
+                raise
         
         # Parse the SRT content to get timing
         srt_lines = transcript.split('\n')
@@ -165,20 +203,16 @@ def create_romanian_video(romanian_script, progress_callback=None):
         # Combine the video clip with the audio
         final_clip = clip.with_audio(audio_clip)
 
-        if progress_callback:
-            yield from progress_callback("Rendering final video (0%)")
-        # Write the video with subtitles
+        # We define an SSELogger instance that calls progress_callback
+        sse_logger = SSELogger(sse_callback=lambda msg: next(progress_callback(msg), None))
+
         output_filename = "final_clip_file.mp4"
-        print("Rendering final video...")
-        
-        # Create a logger function for progress
-        def write_progress(t, message):
-            progress = int((t / total_duration) * 100)
-            if progress_callback:
-                yield from progress_callback(f"Rendering final video ({progress}%)")
-        
-        # Use logger parameter instead of callback
-        final_clip.write_videofile(output_filename, fps=50, logger=write_progress)
+        yield from progress_callback("Rendering final video (0%)")
+        final_clip.write_videofile(
+            output_filename,
+            fps=50,
+            logger=sse_logger   # <-- use the custom logger
+        )
 
         # Then add subtitles if they exist
         if os.path.exists("sub_file.srt"):
