@@ -109,6 +109,21 @@ def create_video():
                     max-height: 200px;
                     overflow-y: auto;
                 }
+                .progress-bar {
+                    width: 100%;
+                    height: 20px;
+                    background-color: #f0f0f0;
+                    border-radius: 10px;
+                    margin: 10px 0;
+                    overflow: hidden;
+                    display: none;
+                }
+                .progress-bar-fill {
+                    height: 100%;
+                    background-color: #007bff;
+                    width: 0%;
+                    transition: width 0.5s ease-in-out;
+                }
             </style>
         </head>
         <body>
@@ -118,6 +133,9 @@ def create_video():
                     <textarea name="script" rows="10" cols="30" placeholder="Enter Romanian script here..." required></textarea><br>
                     <input type="submit" value="Create Video">
                 </form>
+                <div class="progress-bar">
+                    <div class="progress-bar-fill"></div>
+                </div>
                 <div id="progress"></div>
                 <a href="/download" id="downloadBtn" class="download-btn">Download Video</a>
             </div>
@@ -126,11 +144,15 @@ def create_video():
         event.preventDefault();
         const form = event.target;
         const progressDiv = document.getElementById('progress');
+        const progressBar = document.querySelector('.progress-bar');
+        const progressBarFill = document.querySelector('.progress-bar-fill');
         const downloadBtn = document.getElementById('downloadBtn');
 
-        // Reset and show progress div
+        // Reset and show progress elements
         progressDiv.style.display = 'block';
+        progressBar.style.display = 'block';
         progressDiv.innerHTML = '';
+        progressBarFill.style.width = '0%';
         downloadBtn.style.display = 'none';
 
         const script = form.querySelector('textarea[name="script"]').value;
@@ -141,11 +163,16 @@ def create_video():
                 eventSource.close();
                 downloadBtn.style.display = 'inline-block';
                 progressDiv.innerHTML += '<br><span class="success-message">Video created successfully!</span>';
+                progressBarFill.style.width = '100%';
             } else if (event.data.startsWith('ERROR:')) {
                 eventSource.close();
                 progressDiv.innerHTML += '<br><span class="error-message">' + event.data.substring(7) + '</span>';
             } else {
-                progressDiv.innerHTML += event.data + '<br>';
+                const [message, percentage] = event.data.split('|');
+                if (percentage) {
+                    progressBarFill.style.width = percentage + '%';
+                }
+                progressDiv.innerHTML += message + '<br>';
                 progressDiv.scrollTop = progressDiv.scrollHeight;
             }
         };

@@ -67,7 +67,7 @@ class SSELogger(ProgressBarLogger):
 def create_romanian_video(romanian_script, progress_callback=None):
     try:
         if progress_callback:
-            yield from progress_callback("Starting video creation...")
+            yield from progress_callback("Starting video creation...|0")
         
         # Retrieve your ElevenLabs API key from an environment variable
         ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
@@ -81,7 +81,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
         client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
         if progress_callback:
-            yield from progress_callback("Generating audio file...")
+            yield from progress_callback("Generating audio file...|10")
         # Generate audio using ElevenLabs
         print("Generating audio file...")
         audio_stream = client.text_to_speech.convert_as_stream(
@@ -105,7 +105,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
         client = OpenAI(api_key=OPENAI_API_KEY)
         
         if progress_callback:
-            yield from progress_callback("Generating subtitles...")
+            yield from progress_callback("Generating subtitles...|30")
         # Generate SRT file using Whisper for timing
         print("Generating subtitles...")
         with open("audio_file.mp3", "rb") as audio_file:
@@ -177,7 +177,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
             f.write(''.join(srt_content))
 
         if progress_callback:
-            yield from progress_callback("Creating video...")
+            yield from progress_callback("Creating video...|50")
         # Create video
         print("Creating video...")
         audio_clip = AudioFileClip("audio_file.mp3")
@@ -224,7 +224,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
         sse_logger = SSELogger(sse_callback=sse_callback)
         
         output_filename = "final_clip_file.mp4"
-        yield from progress_callback("Starting video render...")
+        yield from progress_callback("Starting video render...|60")
         final_clip.write_videofile(
             output_filename,
             fps=50,
@@ -234,7 +234,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
         # Then add subtitles if they exist
         if os.path.exists("sub_file.srt"):
             if progress_callback:
-                yield from progress_callback("Adding styled subtitles...")
+                yield from progress_callback("Adding styled subtitles...|90")
             print("Adding styled subtitles...")
             ass_file = create_subtitle_clips("sub_file.srt", (1080, 1920))
             final_output = create_styled_subtitles(output_filename, ass_file)
@@ -246,7 +246,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
                 print("Temporary files cleaned up successfully")
 
         if progress_callback:
-            yield from progress_callback("Video creation complete!")
+            yield from progress_callback("Video creation complete!|100")
         print("Video creation complete!")
         
         # Clean up temporary files
