@@ -30,26 +30,46 @@ def timestamp_to_seconds(timestamp):
 
 class SSELogger(ProgressBarLogger):
     """
-    Custom logger to capture encoding progress from MoviePy without recursion.
+    A custom logger that hooks into MoviePy's internal progress updates
+    and forwards them to an SSE callback, while still preserving
+    the classic console progress bar output.
     """
     def __init__(self, sse_callback=None):
         super().__init__()
-        self.sse_callback = sse_callback  # function that sends SSE messages
+        self.sse_callback = sse_callback
+        self.print_progress = True
+        self.current_frame = 0
+        self.total_frames = 0
 
-    def bars_callback(self, bar, attr, value, old_value=None):
-        """
-        Called every time the status of the bars is updated.
-        'bar': e.g. 't' for time progress or 'read_frames'
-        'attr': which attribute is updated (index, total, etc.)
-        'value': new value for that attribute
-        'old_value': old value (if any)
-        """
-        # Only track the main time bar for total progress
-        if bar == 't' and attr == 'index' and self.sse_callback:
-            # Once we know total frames/time, compute approximate percentage
-            if self.bars['t'].total is not None:
-                progress = (value / self.bars['t'].total) * 100
-                self.sse_callback(f"Rendering final video ({progress:.0f}%)")
+    def callback(self, **changes):
+        # This call ensures MoviePy's built-in progress bar is displayed
+        super().callback(**changes)
+
+        # Get the message from changes
+        message = changes.get('message', '')
+        
+        # When writing starts, get total frames
+        if 'Writing video' in message:
+            # Extract total frames from the video metadata
+            self.total_frames = changes.get('total', 0)
+            self.current_frame = 0
+            
+        # Handle frame updates
+        elif 'frame' in changes:
+            self.current_frame = changes.get('frame', 0)
+            if self.total_frames > 0 and self.sse_callback:
+                percent = (self.current_frame / self.total_frames) * 100
+                self.sse_callback(f"Rendering final video ({percent:.0f}%)")
+        
+        # Handle processing message
+        elif isinstance(message, str) and message.startswith('t:'):
+            try:
+                self.current_frame = int(float(message.split(':')[1]))
+                if self.total_frames > 0 and self.sse_callback:
+                    percent = (self.current_frame / self.total_frames) * 100
+                    self.sse_callback(f"Rendering final video ({percent:.0f}%)")
+            except (ValueError, IndexError):
+                pass
 
 def create_romanian_video(romanian_script, progress_callback=None):
     try:
@@ -211,7 +231,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
         final_clip.write_videofile(
             output_filename,
             fps=50,
-            logger=sse_logger   # <-- use the custom logger
+            logger='bar'
         )
 
         # Then add subtitles if they exist
