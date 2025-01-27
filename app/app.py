@@ -255,20 +255,6 @@ def delayed_cleanup(file_path, delay=5):
                         import gc
                         gc.collect()
                         
-                        # On Windows, try to force close any handles
-                        if os.name == 'nt':
-                            try:
-                                import psutil
-                                for proc in psutil.process_iter(['pid', 'open_files']):
-                                    try:
-                                        for file in proc.open_files():
-                                            if file.path == os.path.abspath(file_path):
-                                                current_app.logger.info(f"Found process {proc.pid} holding file handle")
-                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                        pass
-                            except ImportError:
-                                pass
-                        
                         os.remove(file_path)
                         current_app.logger.info(f"File {file_path} cleaned up successfully on attempt {attempt + 1}")
                         break
