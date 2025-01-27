@@ -48,28 +48,21 @@ class SSELogger(ProgressBarLogger):
         # Get the message from changes
         message = changes.get('message', '')
         
-        # When writing starts, get total frames
-        if 'Writing video' in message:
-            # Extract total frames from the video metadata
-            self.total_frames = changes.get('total', 0)
-            self.current_frame = 0
-            
-        # Handle frame updates
-        elif 'frame' in changes:
-            self.current_frame = changes.get('frame', 0)
-            if self.total_frames > 0 and self.sse_callback:
-                percent = (self.current_frame / self.total_frames) * 100
-                self.sse_callback(f"Rendering final video ({percent:.0f}%)")
-        
-        # Handle processing message
-        elif isinstance(message, str) and message.startswith('t:'):
-            try:
-                self.current_frame = int(float(message.split(':')[1]))
-                if self.total_frames > 0 and self.sse_callback:
-                    percent = (self.current_frame / self.total_frames) * 100
-                    self.sse_callback(f"Rendering final video ({percent:.0f}%)")
-            except (ValueError, IndexError):
-                pass
+        if self.sse_callback:
+            if 'Building video' in message:
+                self.sse_callback("Rendering video - Preparing...")
+            elif 'Writing audio' in message:
+                self.sse_callback("Rendering video - Processing audio...")
+            elif 'Writing video' in message:
+                self.sse_callback("Rendering video - Processing frames...")
+            elif 'Done' in message:
+                self.sse_callback("Rendering video - Finalizing...")
+            elif 'frame' in changes:
+                current_frame = changes.get('frame', 0)
+                total = changes.get('total', 100)
+                if total > 0:
+                    percent = (current_frame / total) * 100
+                    self.sse_callback(f"Rendering video - Processing frames ({percent:.0f}%)")
 
 def create_romanian_video(romanian_script, progress_callback=None):
     try:
@@ -223,11 +216,15 @@ def create_romanian_video(romanian_script, progress_callback=None):
         # Combine the video clip with the audio
         final_clip = clip.with_audio(audio_clip)
 
-        # We define an SSELogger instance that calls progress_callback
-        sse_logger = SSELogger(sse_callback=lambda msg: next(progress_callback(msg), None))
-
+        # Create SSELogger instance with a proper callback
+        def sse_callback(msg):
+            if progress_callback:
+                yield from progress_callback(msg)
+                
+        sse_logger = SSELogger(sse_callback=sse_callback)
+        
         output_filename = "final_clip_file.mp4"
-        yield from progress_callback("Rendering final video (0%)")
+        yield from progress_callback("Starting video render...")
         final_clip.write_videofile(
             output_filename,
             fps=50,
