@@ -224,10 +224,10 @@ def create_romanian_video(romanian_script, progress_callback=None):
         sse_logger = SSELogger(sse_callback=sse_callback)
         
         output_filename = "final_clip_file.mp4"
-        yield from progress_callback("Starting video render...|60")
+        yield from progress_callback("Rendering video (it may take a while)...|60")
         final_clip.write_videofile(
             output_filename,
-            fps=50,
+            fps=30,
             logger='bar'
         )
 
