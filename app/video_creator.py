@@ -70,7 +70,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
     and subtitles. Returns True if successful.
     """
     parkour_video = None
-    clip = None
+    clips = []
     final_clip = None
     audio_clip = None
     
@@ -184,47 +184,77 @@ def create_romanian_video(romanian_script, progress_callback=None):
 
         if progress_callback:
             yield from progress_callback("Creating video...|50")
-        # Create video
         print("Creating video...")
         audio_clip = AudioFileClip("audio_file.mp3")
         total_duration = audio_clip.duration
 
-        # Use uploaded video if available, otherwise fall back to default
-        broll_path = "uploads/uploaded_broll.mp4"
-        if not os.path.exists(broll_path):
-            broll_path = "src/placeholder-broll.mp4"
+        # Get all uploaded broll files
+        broll_files = []
+        uploads_dir = "uploads"
+        for file in os.listdir(uploads_dir):
+            if file.startswith("uploaded_broll_") and file.endswith(".mp4"):
+                broll_files.append(os.path.join(uploads_dir, file))
 
-        parkour_video = VideoFileClip(broll_path).without_audio()
-        parkour_duration = parkour_video.duration
+        # If no uploaded files, use default
+        if not broll_files:
+            broll_files = ["src/placeholder-broll.mp4"]
 
-        # Ensure the clip duration doesn't exceed its actual frames
-        start_time = random.uniform(0, max(0, parkour_duration - total_duration))
-        clip = parkour_video.subclipped(start_time, start_time + total_duration)
+        # Process each broll file
+        processed_clips = []
+        for broll_path in broll_files:
+            video = VideoFileClip(broll_path).without_audio()
+            
+            # Resize and crop to fit 9:16 aspect ratio
+            clip_aspect = video.w / video.h
+            target_aspect = 9 / 16
 
-        # Resize and crop to fit 9:16 aspect ratio
-        clip_aspect = clip.w / clip.h
-        target_aspect = 9 / 16
+            if clip_aspect > target_aspect:
+                new_width = video.h * (9 / 16)
+                zoom_factor = 1080 / new_width
+            else:
+                new_height = video.w * (16 / 9)
+                zoom_factor = 1920 / new_height
 
-        if clip_aspect > target_aspect:
-            new_width = clip.h * (9 / 16)
-            zoom_factor = 1080 / new_width
-        else:
-            new_height = clip.w * (16 / 9)
-            zoom_factor = 1920 / new_height
+            video = video.resized(zoom_factor)
 
-        clip = clip.resized(zoom_factor)
+            x_center = video.w / 2
+            y_center = video.h / 2
+            video = video.cropped(
+                x1=x_center - 540,
+                y1=y_center - 960,
+                width=1080,
+                height=1920
+            )
+            processed_clips.append(video)
 
-        x_center = clip.w / 2
-        y_center = clip.h / 2
-        clip = clip.cropped(
-            x1=x_center - 540,
-            y1=y_center - 960,
-            width=1080,
-            height=1920
-        )
+        # Calculate how many times we need to loop through clips
+        CLIP_DURATION = 5  # Duration for each clip in seconds
+        total_clips_needed = math.ceil(total_duration / CLIP_DURATION)
+        
+        # Create final sequence of clips
+        final_clips = []
+        for i in range(total_clips_needed):
+            clip_index = i % len(processed_clips)
+            clip = processed_clips[clip_index]
+            
+            # Calculate start and end times for this segment
+            start_time = i * CLIP_DURATION
+            end_time = min((i + 1) * CLIP_DURATION, total_duration)
+            segment_duration = end_time - start_time
+            
+            # If clip is shorter than needed duration, loop it
+            if clip.duration < segment_duration:
+                clip = clip.loop(duration=segment_duration)
+            else:
+                clip = clip.subclipped(0, segment_duration)
+            
+            final_clips.append(clip)
 
-        # Combine the video clip with the audio
-        final_clip = clip.with_audio(audio_clip)
+        # Concatenate all clips
+        final_clip = concatenate_videoclips(final_clips)
+        
+        # Add audio
+        final_clip = final_clip.with_audio(audio_clip)
 
         # Create SSELogger instance with a proper callback
         def sse_callback(msg):
@@ -265,8 +295,11 @@ def create_romanian_video(romanian_script, progress_callback=None):
         # Clean up the clip resources before returning
         if parkour_video:
             parkour_video.close()
-        if clip:
-            clip.close()
+        for clip in clips:
+            try:
+                clip.close()
+            except:
+                pass
         if final_clip:
             final_clip.close()
         if audio_clip:
@@ -288,11 +321,11 @@ def create_romanian_video(romanian_script, progress_callback=None):
                 parkour_video.close()
         except:
             pass
-        try:
-            if clip:
+        for clip in clips:
+            try:
                 clip.close()
-        except:
-            pass
+            except:
+                pass
         try:
             if final_clip:
                 final_clip.close()
@@ -363,24 +396,24 @@ def create_styled_subtitles(video_input, ass_file):
 def cleanup_broll():
     """
     Manually called after user has finished downloading or viewing
-    the final video. This tries to delete the uploaded b-roll.
+    the final video. This tries to delete all uploaded b-roll files.
     """
     print("Attempting to clean up b-roll...")
-    broll_path = "uploads/uploaded_broll.mp4"
+    uploads_dir = "uploads"
     
-    if os.path.exists(broll_path):
-        # Try multiple times with delays
-        for attempt in range(3):
-            try:
-                time.sleep(2)  # Wait for file handles to be released
-                os.remove(broll_path)
-                print("Uploaded b-roll cleaned up successfully")
-                break
-            except Exception as e:
-                if attempt == 2:  # Only print error on last attempt
-                    print(f"Warning: Could not delete uploaded b-roll: {str(e)}")
-    else:
-        print("No b-roll file found to clean up")
+    for file in os.listdir(uploads_dir):
+        if file.startswith("uploaded_broll_") and file.endswith(".mp4"):
+            file_path = os.path.join(uploads_dir, file)
+            # Try multiple times with delays
+            for attempt in range(3):
+                try:
+                    time.sleep(2)  # Wait for file handles to be released
+                    os.remove(file_path)
+                    print(f"Uploaded b-roll {file} cleaned up successfully")
+                    break
+                except Exception as e:
+                    if attempt == 2:  # Only print error on last attempt
+                        print(f"Warning: Could not delete uploaded b-roll {file}: {str(e)}")
 
 if __name__ == "__main__":
     create_romanian_video()

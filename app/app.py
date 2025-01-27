@@ -221,8 +221,8 @@ def create_video():
                 <h1>Create Romanian Video</h1>
                 <form method="post" id="videoForm" enctype="multipart/form-data">
                     <div class="file-input">
-                        <label class="file-input-label">Upload B-roll Video (MP4 format)</label>
-                        <input type="file" name="broll" accept="video/mp4" required>
+                        <label class="file-input-label">Upload B-roll Videos (MP4 format)</label>
+                        <input type="file" name="broll" accept="video/mp4" multiple required>
                     </div>
                     <textarea name="script" rows="10" cols="30" placeholder="Enter Romanian script here..." required></textarea><br>
                     <input type="submit" value="Create Video">
@@ -252,7 +252,7 @@ def create_video():
                     // Create FormData object to handle file upload
                     const formData = new FormData(form);
                     
-                    // Upload the file first
+                    // Upload the files first
                     fetch('/upload', {
                         method: 'POST',
                         body: formData
@@ -303,21 +303,30 @@ def create_video():
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'broll' not in request.files:
-        return jsonify({'success': False, 'error': 'No file uploaded'})
+        return jsonify({'success': False, 'error': 'No files uploaded'})
     
-    file = request.files['broll']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': 'No file selected'})
+    files = request.files.getlist('broll')
+    if not files or files[0].filename == '':
+        return jsonify({'success': False, 'error': 'No files selected'})
     
-    if file:
-        # Save the uploaded file
-        upload_path = os.path.join(app.root_path, 'uploads')
-        os.makedirs(upload_path, exist_ok=True)
-        file_path = os.path.join(upload_path, 'uploaded_broll.mp4')
-        file.save(file_path)
-        return jsonify({'success': True})
+    upload_path = os.path.join(app.root_path, 'uploads')
+    os.makedirs(upload_path, exist_ok=True)
     
-    return jsonify({'success': False, 'error': 'File upload failed'})
+    # Clean up any existing b-roll files
+    for existing_file in os.listdir(upload_path):
+        if existing_file.startswith("uploaded_broll_"):
+            try:
+                os.remove(os.path.join(upload_path, existing_file))
+            except:
+                pass
+    
+    # Save the new files
+    for i, file in enumerate(files):
+        if file and file.filename.endswith('.mp4'):
+            file_path = os.path.join(upload_path, f'uploaded_broll_{i}.mp4')
+            file.save(file_path)
+    
+    return jsonify({'success': True})
 
 def delayed_cleanup(file_path, delay=5):
     """Attempt to delete a file after a delay with multiple retries."""
@@ -357,8 +366,12 @@ def download_video():
         def cleanup(response):
             current_app.logger.info("Starting cleanup after download...")
             
-            # Schedule delayed cleanup for both files
-            delayed_cleanup('uploads/uploaded_broll.mp4')  # Ensure B-roll is cleaned up
+            # Schedule delayed cleanup for uploads directory and final video
+            uploads_dir = os.path.join(app.root_path, 'uploads')
+            for file in os.listdir(uploads_dir):
+                if file.startswith("uploaded_broll_") and file.endswith(".mp4"):
+                    delayed_cleanup(os.path.join(uploads_dir, file))
+            
             delayed_cleanup(video_path)  # Ensure final video is cleaned up
             
             return response
