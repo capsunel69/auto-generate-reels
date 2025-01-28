@@ -488,7 +488,10 @@ def upload_file():
     
     for i, file in enumerate(files):
         if file and file.filename.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png')):
-            uploaded_filename = f'uploaded_broll_{i}.mp4'
+            # Get the original file extension
+            original_ext = os.path.splitext(file.filename)[1].lower()
+            # Use the original extension for the uploaded file
+            uploaded_filename = f'uploaded_broll_{i}{original_ext}'
             file_path = os.path.join(upload_path, uploaded_filename)
             file.save(file_path)
             saved_files.append(uploaded_filename)
