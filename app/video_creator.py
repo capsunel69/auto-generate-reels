@@ -328,39 +328,20 @@ def create_romanian_video(romanian_script, progress_callback=None):
         # Get all uploaded broll files (now including images)
         broll_files = []
         uploads_dir = "uploads"
-        
-        print("\nDEBUG - File Processing:")
-        print("1. Checking order.json...")
-        
-        # Get the file order from the order.json file
         order_file = os.path.join(uploads_dir, "order.json")
+        
+        # First check if order.json exists and use its order
         if os.path.exists(order_file):
             with open(order_file, 'r') as f:
                 ordered_filenames = json.load(f)
-                print(f"Found order.json with filenames: {ordered_filenames}")
-                
-                # Get all uploaded files
-                uploaded_files = [f for f in os.listdir(uploads_dir) 
-                                if f.startswith("uploaded_broll_") and 
-                                f.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png'))]
-                print(f"Available uploaded files: {uploaded_files}")
-                
-                # Sort uploaded files by their index
-                uploaded_files.sort(key=lambda x: int(x.replace("uploaded_broll_", "").split(".")[0]))
-                
-                # Create a mapping between ordered files and uploaded files
-                for i, original_name in enumerate(ordered_filenames):
-                    if i < len(uploaded_files):
-                        file_path = os.path.join(uploads_dir, uploaded_files[i])
-                        print(f"Mapping {original_name} -> {uploaded_files[i]}")
-                        if os.path.exists(file_path):
-                            broll_files.append(file_path)
-        else:
-            print("No order.json file found")
-
-        # Only add remaining files if no files were added from order.json
+                # Use the exact order from order.json
+                for filename in ordered_filenames:
+                    file_path = os.path.join(uploads_dir, filename)
+                    if os.path.exists(file_path):
+                        broll_files.append(file_path)
+        
+        # If no files were found from order.json, fall back to default behavior
         if not broll_files:
-            print("2. No files from order.json, adding all uploaded files...")
             for file in os.listdir(uploads_dir):
                 if (file.startswith("uploaded_broll_") and 
                     file.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png'))):
@@ -369,10 +350,9 @@ def create_romanian_video(romanian_script, progress_callback=None):
         
         # If still no files, use default
         if not broll_files:
-            print("3. No uploaded files found, using default placeholder")
             broll_files = ["src/placeholder-broll.mp4"]
 
-        print(f"\nFinal broll files order: {broll_files}\n")
+        print(f"\nUsing broll files in order: {broll_files}\n")
 
         # Process each file
         processed_clips = []
@@ -535,7 +515,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default, Arial, 72, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 1, 0, 0, 0, 100, 100, 0, 0, 1, 2, 4, 2, 150, 150, 30, 1
+Style: Default, Montserrat, 72, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 1, 0, 0, 0, 100, 100, 0, 0, 1, 3, 5, 2, 150, 150, 30, 1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -562,7 +542,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end_time = srt_time_to_ass_time(sub.end)
         text = sub.text.replace('\n', '\\N')  # ASS line breaks
         
-        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(200,200)\\pos(540,1200)\\q1\\w8}}{text}\n"
+        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(200,200)\\move(540,1300,540,1200)\\q1\\w8}}{text}\n"
     
     # Save ASS file
     ass_file = "subtitles.ass"

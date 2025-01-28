@@ -374,20 +374,14 @@ def create_video():
                     });
                 });
 
-                document.getElementById('videoForm').onsubmit = function(event) {
+                document.getElementById('videoForm').onsubmit = async function(event) {
                     event.preventDefault();
                     const form = event.target;
                     const fileList = document.getElementById('fileList');
                     const formData = new FormData(form);
 
                     // Get the actual order of files after drag and drop
-                    const fileOrder = Array.from(fileList.children).map((li, newIndex) => {
-                        const originalName = li.dataset.filename;
-                        const ext = originalName.substring(originalName.lastIndexOf('.'));
-                        return `uploaded_broll_${newIndex}${ext}`;
-                    });
-
-                    formData.append('file_order', JSON.stringify(fileOrder));
+                    const fileOrder = Array.from(fileList.children).map(li => li.dataset.filename);
 
                     // Reset and show progress elements
                     const progressDiv = document.getElementById('progress');
@@ -401,48 +395,64 @@ def create_video():
                     progressBarFill.style.width = '0%';
                     downloadBtn.style.display = 'none';
 
-                    // Upload the files first
-                    fetch('/upload', {
-                        method: 'POST',
-                        body: formData
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            // Start SSE connection after successful upload
-                            const script = form.querySelector('textarea[name="script"]').value;
-                            const eventSource = new EventSource(`/progress?script=${encodeURIComponent(script)}`);
-                            
-                            eventSource.onmessage = function(event) {
-                                if (event.data === 'DONE') {
-                                    eventSource.close();
-                                    downloadBtn.style.display = 'inline-block';
-                                    progressDiv.innerHTML += '<br><span class="success-message">Video created successfully!</span>';
-                                    progressBarFill.style.width = '100%';
-                                } else if (event.data.startsWith('ERROR:')) {
-                                    eventSource.close();
-                                    progressDiv.innerHTML += '<br><span class="error-message">' + event.data.substring(7) + '</span>';
-                                } else {
-                                    const [message, percentage] = event.data.split('|');
-                                    if (percentage) {
-                                        progressBarFill.style.width = percentage + '%';
-                                    }
-                                    progressDiv.innerHTML += message + '<br>';
-                                    progressDiv.scrollTop = progressDiv.scrollHeight;
-                                }
-                            };
-
-                            eventSource.onerror = function() {
-                                eventSource.close();
-                                progressDiv.innerHTML += '<br><span class="error-message">Connection lost</span>';
-                            };
-                        } else {
-                            progressDiv.innerHTML += '<br><span class="error-message">' + data.error + '</span>';
+                    try {
+                        // First upload the files
+                        const uploadResponse = await fetch('/upload', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const uploadData = await uploadResponse.json();
+                        
+                        if (!uploadData.success) {
+                            throw new Error(uploadData.error || 'Upload failed');
                         }
-                    })
-                    .catch(error => {
-                        progressDiv.innerHTML += '<br><span class="error-message">Upload failed: ' + error.message + '</span>';
-                    });
+
+                        // Then reorder the files using the actual UI order
+                        const reorderResponse = await fetch('/reorder', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                file_order: fileOrder  // Send the actual filenames in UI order
+                            })
+                        });
+                        const reorderData = await reorderResponse.json();
+                        
+                        if (!reorderData.success) {
+                            throw new Error(reorderData.error || 'Reorder failed');
+                        }
+
+                        // Finally start video creation
+                        const script = form.querySelector('textarea[name="script"]').value;
+                        const eventSource = new EventSource(`/progress?script=${encodeURIComponent(script)}`);
+                        
+                        eventSource.onmessage = function(event) {
+                            if (event.data === 'DONE') {
+                                eventSource.close();
+                                downloadBtn.style.display = 'inline-block';
+                                progressDiv.innerHTML += '<br><span class="success-message">Video created successfully!</span>';
+                                progressBarFill.style.width = '100%';
+                            } else if (event.data.startsWith('ERROR:')) {
+                                eventSource.close();
+                                progressDiv.innerHTML += '<br><span class="error-message">' + event.data.substring(7) + '</span>';
+                            } else {
+                                const [message, percentage] = event.data.split('|');
+                                if (percentage) {
+                                    progressBarFill.style.width = percentage + '%';
+                                }
+                                progressDiv.innerHTML += message + '<br>';
+                                progressDiv.scrollTop = progressDiv.scrollHeight;
+                            }
+                        };
+
+                        eventSource.onerror = function() {
+                            eventSource.close();
+                            progressDiv.innerHTML += '<br><span class="error-message">Connection lost</span>';
+                        };
+                    } catch (error) {
+                        progressDiv.innerHTML += '<br><span class="error-message">Error: ' + error.message + '</span>';
+                    }
                 };
 
                 // Add this at the start of your script section
@@ -472,60 +482,51 @@ def upload_file():
     upload_path = os.path.join(app.root_path, 'uploads')
     os.makedirs(upload_path, exist_ok=True)
     
-    # Clean up any existing b-roll files
-    for existing_file in os.listdir(upload_path):
-        if existing_file.startswith("uploaded_broll_"):
-            try:
-                os.remove(os.path.join(upload_path, existing_file))
-            except:
-                pass
-    
-    # Get the file order from the form data
-    file_order = json.loads(request.form.get('file_order', '[]'))
-    print("Received file order:", file_order)
-    
-    # First, save all files with temporary names
-    temp_files = {}
-    for file in files:
-        if file and file.filename.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png')):
-            temp_name = f'temp_{file.filename}'
-            file_path = os.path.join(upload_path, temp_name)
-            file.save(file_path)
-            temp_files[file.filename] = temp_name
-    
-    # Then rename them according to the order
+    # Save files with sequential names and track original names
     saved_files = []
-    used_files = set()
+    filename_mapping = {}  # Map original names to uploaded names
     
-    for i, ordered_filename in enumerate(file_order):
-        ext = ordered_filename.split('.')[-1]
-        # Find the original file that matches this extension and hasn't been used
-        for original_name, temp_name in temp_files.items():
-            if original_name.lower().endswith(ext) and original_name not in used_files:
-                old_path = os.path.join(upload_path, temp_name)
-                new_filename = f'uploaded_broll_{i}.{ext}'
-                new_path = os.path.join(upload_path, new_filename)
-                
-                if os.path.exists(old_path):
-                    os.rename(old_path, new_path)
-                    saved_files.append(new_filename)
-                    used_files.add(original_name)
-                    print(f"Renamed {temp_name} to {new_filename}")
-                break
+    for i, file in enumerate(files):
+        if file and file.filename.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png')):
+            uploaded_filename = f'uploaded_broll_{i}.mp4'
+            file_path = os.path.join(upload_path, uploaded_filename)
+            file.save(file_path)
+            saved_files.append(uploaded_filename)
+            filename_mapping[file.filename] = uploaded_filename
+            print(f"Saved {file.filename} as {uploaded_filename}")
     
-    # Clean up any remaining temporary files
-    for temp_name in temp_files.values():
-        temp_path = os.path.join(upload_path, temp_name)
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-    
-    print("Final saved files:", saved_files)
-    
-    # Save the file order
+    # Save both the initial order and the filename mapping
     with open(os.path.join(upload_path, 'order.json'), 'w') as f:
         json.dump(saved_files, f)
     
+    with open(os.path.join(upload_path, 'filename_mapping.json'), 'w') as f:
+        json.dump(filename_mapping, f)
+    
     return jsonify({'success': True})
+
+@app.route('/reorder', methods=['POST'])
+def reorder_files():
+    """Handle reordering of already uploaded files"""
+    try:
+        upload_path = os.path.join(app.root_path, 'uploads')
+        data = request.get_json()
+        original_order = data.get('file_order', [])
+        
+        # Load the filename mapping
+        with open(os.path.join(upload_path, 'filename_mapping.json'), 'r') as f:
+            filename_mapping = json.load(f)
+        
+        # Convert original filenames to uploaded filenames
+        new_order = [filename_mapping[original_name] for original_name in original_order]
+        
+        # Save the new order
+        with open(os.path.join(upload_path, 'order.json'), 'w') as f:
+            json.dump(new_order, f)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"Error during reordering: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
 
 def delayed_cleanup(file_path, delay=5):
     """Attempt to delete a file after a delay with multiple retries."""
@@ -760,9 +761,6 @@ def scraper():
                     border-radius: 0.5rem;
                     padding: 1rem;
                     border: 1px solid #e5e7eb;
-                    min-height: 200px;
-                    resize: vertical;
-                    box-sizing: border-box;
                 }
 
                 #result:focus {
