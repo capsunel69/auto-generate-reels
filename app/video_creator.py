@@ -1,7 +1,7 @@
 import openai
 import requests
 import os
-from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
+from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip, ImageClip, VideoClip
 import math
 import pysrt
 import time
@@ -16,6 +16,7 @@ from pydub import AudioSegment
 import io
 import wave
 from difflib import SequenceMatcher
+from skimage.transform import resize
 
 # Set the path to your Google Cloud credentials JSON file
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'dogwood-boulder-392113-d8917a17686f.json'
@@ -204,6 +205,56 @@ def align_texts(original_script, recognized_words):
     
     return aligned_words
 
+def create_clip_from_image(image_path, duration=5):
+    """Create a video clip from an image with a subtle pan/zoom effect"""
+    image = ImageClip(image_path)
+    
+    # Resize to fit 9:16 aspect ratio while maintaining original size for zoom
+    target_w, target_h = 1080, 1920
+    clip_aspect = image.w / image.h
+    target_aspect = target_w / target_h
+
+    if clip_aspect > target_aspect:
+        # Image is wider than 9:16
+        new_width = int(image.h * (9/16))
+        x_offset = (image.w - new_width) // 2
+        image = image.cropped(x1=x_offset, width=new_width)
+    else:
+        # Image is taller than 9:16
+        new_height = int(image.w * (16/9))
+        y_offset = (image.h - new_height) // 2
+        image = image.cropped(y1=y_offset, height=new_height)
+
+    # Resize to slightly larger than final size to allow for zoom
+    base_size = (int(target_w * 1.1), int(target_h * 1.1))
+    image = image.resized(base_size)
+
+    def make_frame(t):
+        progress = t / duration
+        
+        # Calculate zoom factor (1.0 to 1.1)
+        zoom = 1.0 + (0.1 * progress)
+        
+        # Get the frame
+        frame = image.get_frame(0)  # Always get the first frame since it's a static image
+        
+        # Calculate crop dimensions
+        current_w = int(target_w * zoom)
+        current_h = int(target_h * zoom)
+        
+        # Calculate crop position to keep center
+        x1 = (base_size[0] - current_w) // 2
+        y1 = (base_size[1] - current_h) // 2
+        
+        # Crop the frame
+        cropped = frame[y1:y1+current_h, x1:x1+current_w]
+        
+        # Resize to final dimensions
+        return resize(cropped, (target_h, target_w), preserve_range=True).astype('uint8')
+
+    # Create the clip with the new frame generator
+    return VideoClip(make_frame, duration=duration)
+
 def create_romanian_video(romanian_script, progress_callback=None):
     """
     Generates the final video with Romanian script, audio, 
@@ -221,7 +272,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
             raise ValueError("ELEVENLABS_API_KEY is not set in environment variables.")
         
         VOICE_ID = "SWN0Y4Js5I9UJiF9VqEP"
-        SUBTITLE_GAP = 0.001
+        SUBTITLE_GAP = 0
         
         # Initialize ElevenLabs client
         client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
@@ -273,44 +324,52 @@ def create_romanian_video(romanian_script, progress_callback=None):
         audio_clip = AudioFileClip("audio_file.mp3")
         total_duration = audio_clip.duration
 
-        # Get all uploaded broll files
+        # Get all uploaded broll files (now including images)
         broll_files = []
         uploads_dir = "uploads"
         for file in os.listdir(uploads_dir):
-            if file.startswith("uploaded_broll_") and file.endswith(".mp4"):
+            if file.startswith("uploaded_broll_") and file.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png')):
                 broll_files.append(os.path.join(uploads_dir, file))
 
         # If no uploaded files, use default
         if not broll_files:
             broll_files = ["src/placeholder-broll.mp4"]
 
-        # Process each broll file
+        # Process each file
         processed_clips = []
         for broll_path in broll_files:
-            video = VideoFileClip(broll_path).without_audio()
+            file_ext = broll_path.lower().split('.')[-1]
             
-            # Resize and crop to fit 9:16 aspect ratio
-            clip_aspect = video.w / video.h
-            target_aspect = 9 / 16
-
-            if clip_aspect > target_aspect:
-                new_width = video.h * (9 / 16)
-                zoom_factor = 1080 / new_width
+            if file_ext in ['jpg', 'jpeg', 'png']:
+                # Process image files
+                clip = create_clip_from_image(broll_path, duration=5)
             else:
-                new_height = video.w * (16 / 9)
-                zoom_factor = 1920 / new_height
+                # Process video files (existing logic)
+                clip = VideoFileClip(broll_path).without_audio()
+                
+                # Resize and crop to fit 9:16 aspect ratio
+                clip_aspect = clip.w / clip.h
+                target_aspect = 9 / 16
 
-            video = video.resized(zoom_factor)
+                if clip_aspect > target_aspect:
+                    new_width = clip.h * (9 / 16)
+                    zoom_factor = 1080 / new_width
+                else:
+                    new_height = clip.w * (16 / 9)
+                    zoom_factor = 1920 / new_height
 
-            x_center = video.w / 2
-            y_center = video.h / 2
-            video = video.cropped(
-                x1=x_center - 540,
-                y1=y_center - 960,
-                width=1080,
-                height=1920
-            )
-            processed_clips.append(video)
+                clip = clip.resized(zoom_factor)
+
+                x_center = clip.w / 2
+                y_center = clip.h / 2
+                clip = clip.cropped(
+                    x1=x_center - 540,
+                    y1=y_center - 960,
+                    width=1080,
+                    height=1920
+                )
+            
+            processed_clips.append(clip)
 
         # Calculate how many times we need to loop through clips
         CLIP_DURATION = 5  # Duration for each clip in seconds
@@ -489,8 +548,11 @@ def cleanup_broll():
     print("Attempting to clean up b-roll...")
     uploads_dir = "uploads"
     
+    # Define allowed file extensions
+    allowed_extensions = ('.mp4', '.jpg', '.jpeg', '.png')
+    
     for file in os.listdir(uploads_dir):
-        if file.startswith("uploaded_broll_") and file.endswith(".mp4"):
+        if file.startswith("uploaded_broll_") and file.lower().endswith(allowed_extensions):
             file_path = os.path.join(uploads_dir, file)
             # Try multiple times with delays
             for attempt in range(3):

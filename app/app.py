@@ -322,8 +322,10 @@ def upload_file():
     
     # Save the new files
     for i, file in enumerate(files):
-        if file and file.filename.endswith('.mp4'):
-            file_path = os.path.join(upload_path, f'uploaded_broll_{i}.mp4')
+        if file and file.filename.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png')):
+            # Keep the original file extension
+            ext = os.path.splitext(file.filename)[1].lower()
+            file_path = os.path.join(upload_path, f'uploaded_broll_{i}{ext}')
             file.save(file_path)
     
     return jsonify({'success': True})
@@ -361,7 +363,9 @@ def download_video():
         video_path = 'final_video_with_subs.mp4'
         if not os.path.exists(video_path):
             return "Video file not found", 404
-
+        
+        allowed_extensions = ('.mp4', '.jpg', '.jpeg', '.png')
+        
         @after_this_request
         def cleanup(response):
             current_app.logger.info("Starting cleanup after download...")
@@ -369,7 +373,7 @@ def download_video():
             # Schedule delayed cleanup for uploads directory and final video
             uploads_dir = os.path.join(app.root_path, 'uploads')
             for file in os.listdir(uploads_dir):
-                if file.startswith("uploaded_broll_") and file.endswith(".mp4"):
+                if file.startswith("uploaded_broll_") and file.lower().endswith(allowed_extensions):
                     delayed_cleanup(os.path.join(uploads_dir, file))
             
             delayed_cleanup(video_path)  # Ensure final video is cleaned up
