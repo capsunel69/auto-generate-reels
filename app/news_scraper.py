@@ -75,8 +75,9 @@ def generate_tiktok_script(article_data):
                 {"role": "system", "content": "You are a skilled Romanian news script writer for social media, specialized in creating viral hooks."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
-            temperature=0.7
+            max_tokens=100,
+            # Controls randomness in the output (0.0 = deterministic, 1.0 = most random)
+            temperature=0.7  # Balanced between creativity and consistency
         )
         
         print("\nResponse received from OpenAI!")
