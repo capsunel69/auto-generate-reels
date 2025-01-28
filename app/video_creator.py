@@ -15,6 +15,7 @@ from google.cloud import storage
 from pydub import AudioSegment
 import io
 import wave
+from difflib import SequenceMatcher
 
 # Set the path to your Google Cloud credentials JSON file
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'dogwood-boulder-392113-d8917a17686f.json'
@@ -160,6 +161,49 @@ def create_grouped_srt(words_with_times, max_words=4):
     
     return ''.join(srt_content)
 
+def align_texts(original_script, recognized_words):
+    """
+    Align the original script words with the recognized words using their similarity
+    while preserving the timestamps from recognized words.
+    """
+    # Split original script into words
+    original_words = original_script.split()
+    aligned_words = []
+    
+    rec_idx = 0
+    orig_idx = 0
+    
+    while rec_idx < len(recognized_words) and orig_idx < len(original_words):
+        rec_word = recognized_words[rec_idx]['word'].lower().strip('.,!?')
+        orig_word = original_words[orig_idx].lower().strip('.,!?')
+        
+        # If words match exactly or are very similar
+        if rec_word == orig_word or SequenceMatcher(None, rec_word, orig_word).ratio() > 0.8:
+            aligned_words.append({
+                'word': original_words[orig_idx],  # Use original word
+                'start_time': recognized_words[rec_idx]['start_time'],
+                'end_time': recognized_words[rec_idx]['end_time']
+            })
+            rec_idx += 1
+            orig_idx += 1
+        else:
+            # If recognized word is likely wrong, use original word with estimated timing
+            if rec_idx < len(recognized_words) - 1:
+                # Estimate timing based on surrounding recognized words
+                start_time = recognized_words[rec_idx]['start_time']
+                end_time = recognized_words[rec_idx]['end_time']
+                word_duration = end_time - start_time
+                
+                aligned_words.append({
+                    'word': original_words[orig_idx],
+                    'start_time': start_time,
+                    'end_time': end_time
+                })
+            orig_idx += 1
+            rec_idx += 1
+    
+    return aligned_words
+
 def create_romanian_video(romanian_script, progress_callback=None):
     """
     Generates the final video with Romanian script, audio, 
@@ -213,8 +257,11 @@ def create_romanian_video(romanian_script, progress_callback=None):
         # Get word-level timestamps from Google Cloud
         words_with_times = get_word_timestamps_from_google("audio_file.mp3")
         
-        # Create SRT file with grouped words
-        srt_content = create_grouped_srt(words_with_times, max_words=4)
+        # Align the original script with the recognized words
+        aligned_words = align_texts(romanian_script, words_with_times)
+        
+        # Create SRT file with aligned words
+        srt_content = create_grouped_srt(aligned_words, max_words=4)
         
         # Save the processed SRT file
         with open("sub_file.srt", "w", encoding="utf-8") as f:
