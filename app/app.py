@@ -221,8 +221,8 @@ def create_video():
                 <h1>Create Romanian Video</h1>
                 <form method="post" id="videoForm" enctype="multipart/form-data">
                     <div class="file-input">
-                        <label class="file-input-label">Upload B-roll Videos (MP4 format)</label>
-                        <input type="file" name="broll" accept="video/mp4" multiple required>
+                        <label class="file-input-label">Upload B-roll Videos and Images (MP4, JPG, JPEG, PNG)</label>
+                        <input type="file" name="broll" accept="video/mp4,image/jpeg,image/jpg,image/png" multiple required>
                     </div>
                     <textarea name="script" rows="10" cols="30" placeholder="Enter Romanian script here..." required></textarea><br>
                     <input type="submit" value="Create Video">
