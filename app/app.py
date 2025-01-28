@@ -32,7 +32,7 @@ def progress_stream():
 
     return Response(generate(), mimetype='text/event-stream')
 
-@app.route('/', methods=['GET'])
+@app.route('/video-creator', methods=['GET'])
 def create_video():
     return render_template_string('''
         <!doctype html>
@@ -265,10 +265,42 @@ def create_video():
                     padding: 0.5rem;
                     color: var(--text-secondary);
                 }
+
+                .nav-menu {
+                    display: flex;
+                    justify-content: center;
+                    gap: 1rem;
+                    margin-bottom: 2rem;
+                }
+
+                .nav-link {
+                    padding: 0.5rem 1rem;
+                    text-decoration: none;
+                    color: var(--text-primary);
+                    background-color: var(--card-bg);
+                    border-radius: 0.5rem;
+                    transition: all 0.15s ease-in-out;
+                    border: 1px solid #e5e7eb;
+                }
+
+                .nav-link:hover {
+                    background-color: var(--primary-color);
+                    color: white;
+                }
+
+                .nav-link.active {
+                    background-color: var(--primary-color);
+                    color: white;
+                }
             </style>
         </head>
         <body>
             <div class="container">
+                <div class="nav-menu">
+                    <a href="/scraper" class="nav-link">News Scraper</a>
+                    <a href="/video-creator" class="nav-link active">Video Creator</a>
+                    <a href="/" class="nav-link">Back Home</a>
+                </div>
                 <h1>Create Romanian Video</h1>
                 <form method="post" id="videoForm" enctype="multipart/form-data">
                     <div class="file-input">
@@ -538,6 +570,413 @@ def download_video():
     except Exception as e:
         current_app.logger.error(f"Download error: {e}")
         return str(e), 404
+
+@app.route('/scraper', methods=['GET'])
+def scraper():
+    return render_template_string('''
+        <!doctype html>
+        <html lang="en">
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>News Scraper</title>
+            <style>
+                :root {
+                    --primary-color: #4f46e5;
+                    --primary-hover: #4338ca;
+                    --success-color: #22c55e;
+                    --success-hover: #16a34a;
+                    --error-color: #ef4444;
+                    --background: #f9fafb;
+                    --card-bg: #ffffff;
+                    --text-primary: #111827;
+                    --text-secondary: #6b7280;
+                }
+
+                body {
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    margin: 0;
+                    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: var(--text-primary);
+                    line-height: 1.5;
+                }
+
+                .container {
+                    background-color: var(--card-bg);
+                    padding: 2rem;
+                    border-radius: 1rem;
+                    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+                    width: 90%;
+                    max-width: 600px;
+                    margin: 2rem;
+                    backdrop-filter: blur(10px);
+                }
+
+                h1 {
+                    font-size: 1.875rem;
+                    font-weight: 700;
+                    margin-bottom: 1.5rem;
+                    color: var(--text-primary);
+                }
+
+                input[type="url"] {
+                    width: 100%;
+                    margin-bottom: 1rem;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.5rem;
+                    font-size: 1rem;
+                    transition: border-color 0.15s ease-in-out;
+                    padding: 0.75rem;
+                    box-sizing: border-box;
+                }
+
+                input[type="url"]:focus {
+                    outline: none;
+                    border-color: var(--primary-color);
+                    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+                }
+
+                input[type="submit"] {
+                    background-color: var(--primary-color);
+                    color: white;
+                    padding: 0.75rem 1.5rem;
+                    border: none;
+                    border-radius: 0.5rem;
+                    font-weight: 500;
+                    cursor: pointer;
+                    transition: background-color 0.15s ease-in-out;
+                    width: 100%;
+                }
+
+                input[type="submit"]:hover {
+                    background-color: var(--primary-hover);
+                }
+
+                #progress {
+                    margin-top: 1.5rem;
+                    font-size: 0.875rem;
+                    color: var(--text-secondary);
+                    background-color: #f8fafc;
+                    border-radius: 0.5rem;
+                    padding: 1rem;
+                    border: 1px solid #e5e7eb;
+                }
+
+                #result {
+                    margin-top: 1.5rem;
+                    font-size: 0.875rem;
+                    color: var(--text-primary);
+                    background-color: #f8fafc;
+                    border-radius: 0.5rem;
+                    padding: 1rem;
+                    border: 1px solid #e5e7eb;
+                    max-height: 400px;
+                    overflow-y: auto;
+                }
+
+                #result::-webkit-scrollbar {
+                    width: 8px;
+                }
+
+                #result::-webkit-scrollbar-track {
+                    background: #f1f1f1;
+                    border-radius: 4px;
+                }
+
+                #result::-webkit-scrollbar-thumb {
+                    background: #cbd5e1;
+                    border-radius: 4px;
+                }
+
+                #result::-webkit-scrollbar-thumb:hover {
+                    background: #94a3b8;
+                }
+
+                .nav-menu {
+                    display: flex;
+                    justify-content: center;
+                    gap: 1rem;
+                    margin-bottom: 2rem;
+                }
+
+                .nav-link {
+                    padding: 0.5rem 1rem;
+                    text-decoration: none;
+                    color: var(--text-primary);
+                    background-color: var(--card-bg);
+                    border-radius: 0.5rem;
+                    transition: all 0.15s ease-in-out;
+                    border: 1px solid #e5e7eb;
+                }
+
+                .nav-link:hover {
+                    background-color: var(--primary-color);
+                    color: white;
+                }
+
+                .nav-link.active {
+                    background-color: var(--primary-color);
+                    color: white;
+                }
+
+                .success-message {
+                    color: var(--success-color);
+                    font-weight: 500;
+                }
+
+                .error-message {
+                    color: var(--error-color);
+                    font-weight: 500;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="nav-menu">
+                    <a href="/scraper" class="nav-link active">News Scraper</a>
+                    <a href="/video-creator" class="nav-link">Video Creator</a>
+                    <a href="/" class="nav-link">Back Home</a>
+                </div>
+                <h1>News Article Scraper</h1>
+                <form id="scraperForm">
+                    <input type="url" name="url" placeholder="Enter news article URL..." required>
+                    <input type="submit" value="Generate Script">
+                </form>
+                <div id="progress" style="display: none;"></div>
+                <div id="result" style="display: none;"></div>
+            </div>
+            <script>
+                document.getElementById('scraperForm').onsubmit = async function(e) {
+                    e.preventDefault();
+                    const form = e.target;
+                    const url = form.url.value;
+                    const progress = document.getElementById('progress');
+                    const result = document.getElementById('result');
+                    
+                    progress.style.display = 'block';
+                    progress.innerHTML = '<span class="success-message">Generating script...</span>';
+                    result.style.display = 'none';
+                    result.innerHTML = '';
+                    
+                    try {
+                        const response = await fetch('/scrape', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ url: url })
+                        });
+                        
+                        const data = await response.json();
+                        if (data.success) {
+                            progress.innerHTML = '<span class="success-message">Script generated successfully!</span>';
+                            result.style.display = 'block';
+                            result.innerHTML = data.script;
+                        } else {
+                            progress.innerHTML = '<span class="error-message">Error: ' + data.error + '</span>';
+                        }
+                    } catch (error) {
+                        progress.innerHTML = '<span class="error-message">Error: ' + error.message + '</span>';
+                    }
+                };
+            </script>
+        </body>
+        </html>
+    ''')
+
+@app.route('/scrape', methods=['POST'])
+def scrape():
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        if not url:
+            return jsonify({'success': False, 'error': 'No URL provided'})
+        
+        from news_scraper import create_news_script
+        script = create_news_script(url)
+        return jsonify({'success': True, 'script': script})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/')
+def home():
+    return render_template_string('''
+        <!doctype html>
+        <html lang="en">
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>AI Video Creator</title>
+            <style>
+                :root {
+                    --primary-color: #4f46e5;
+                    --primary-hover: #4338ca;
+                    --background: #f9fafb;
+                    --card-bg: #ffffff;
+                    --text-primary: #111827;
+                    --text-secondary: #6b7280;
+                }
+
+                body {
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    margin: 0;
+                    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: var(--text-primary);
+                    line-height: 1.5;
+                }
+
+                .container {
+                    background-color: var(--card-bg);
+                    padding: 3rem;
+                    border-radius: 1.5rem;
+                    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+                    width: 90%;
+                    max-width: 800px;
+                    margin: 2rem;
+                    backdrop-filter: blur(10px);
+                    text-align: center;
+                }
+
+                .logo {
+                    font-size: 2.5rem;
+                    font-weight: 800;
+                    color: var(--primary-color);
+                    margin-bottom: 1rem;
+                    letter-spacing: -0.025em;
+                }
+
+                h1 {
+                    font-size: 3.5rem;
+                    font-weight: 800;
+                    margin-bottom: 1.5rem;
+                    color: var(--text-primary);
+                    line-height: 1.2;
+                    letter-spacing: -0.025em;
+                }
+
+                .tagline {
+                    font-size: 1.25rem;
+                    color: var(--text-secondary);
+                    margin-bottom: 3rem;
+                    max-width: 600px;
+                    margin-left: auto;
+                    margin-right: auto;
+                }
+
+                .tools-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                    gap: 2rem;
+                    margin-top: 3rem;
+                }
+
+                .tool-card {
+                    background: var(--background);
+                    padding: 2rem;
+                    border-radius: 1rem;
+                    text-decoration: none;
+                    color: var(--text-primary);
+                    transition: all 0.3s ease;
+                    border: 1px solid #e5e7eb;
+                }
+
+                .tool-card:hover {
+                    transform: translateY(-5px);
+                    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+                    border-color: var(--primary-color);
+                }
+
+                .tool-icon {
+                    font-size: 2rem;
+                    margin-bottom: 1rem;
+                }
+
+                .tool-title {
+                    font-size: 1.25rem;
+                    font-weight: 600;
+                    margin-bottom: 0.5rem;
+                }
+
+                .tool-description {
+                    font-size: 0.875rem;
+                    color: var(--text-secondary);
+                }
+
+                .gradient-text {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    background-clip: text;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="logo">🎥 AI Video Creator</div>
+                <h1>Transform Your Content<br><span class="gradient-text">Into Engaging Videos</span></h1>
+                <p class="tagline">
+                    Streamline your content creation process with our AI-powered tools. 
+                    From news scraping to video generation, create compelling content in minutes.
+                </p>
+                
+                <div class="tools-grid">
+                    <a href="/scraper" class="tool-card">
+                        <div class="tool-icon">📰</div>
+                        <div class="tool-title">News Scraper</div>
+                        <div class="tool-description">
+                            Transform news articles into well-structured scripts ready for video production.
+                        </div>
+                    </a>
+                    
+                    <a href="/video-creator" class="tool-card">
+                        <div class="tool-icon">🎬</div>
+                        <div class="tool-title">Video Creator</div>
+                        <div class="tool-description">
+                            Create professional videos with custom B-roll footage and automated subtitles.
+                        </div>
+                    </a>
+                </div>
+            </div>
+            <div class="footer">
+                Made with <span class="heart">❤️</span> by Capsuna Kukeritoru
+            </div>
+            <style>
+                .footer {
+                    position: fixed;
+                    bottom: 60px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background-color: rgba(255, 255, 255, 0.9);
+                    padding: 8px 20px;
+                    border-radius: 20px;
+                    font-size: 0.9rem;
+                    color: var(--text-secondary);
+                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                    backdrop-filter: blur(5px);
+                }
+
+                .heart {
+                    display: inline-block;
+                    animation: heartbeat 1.5s ease infinite;
+                }
+
+                @keyframes heartbeat {
+                    0% { transform: scale(1); }
+                    50% { transform: scale(1.2); }
+                    100% { transform: scale(1); }
+                }
+            </style>
+        </body>
+        </html>
+    ''')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
