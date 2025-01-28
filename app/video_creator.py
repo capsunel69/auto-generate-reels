@@ -17,6 +17,7 @@ import io
 import wave
 from difflib import SequenceMatcher
 from skimage.transform import resize
+import json
 
 # Set the path to your Google Cloud credentials JSON file
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'dogwood-boulder-392113-d8917a17686f.json'
@@ -327,13 +328,51 @@ def create_romanian_video(romanian_script, progress_callback=None):
         # Get all uploaded broll files (now including images)
         broll_files = []
         uploads_dir = "uploads"
-        for file in os.listdir(uploads_dir):
-            if file.startswith("uploaded_broll_") and file.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png')):
-                broll_files.append(os.path.join(uploads_dir, file))
+        
+        print("\nDEBUG - File Processing:")
+        print("1. Checking order.json...")
+        
+        # Get the file order from the order.json file
+        order_file = os.path.join(uploads_dir, "order.json")
+        if os.path.exists(order_file):
+            with open(order_file, 'r') as f:
+                ordered_filenames = json.load(f)
+                print(f"Found order.json with filenames: {ordered_filenames}")
+                
+                # Get all uploaded files
+                uploaded_files = [f for f in os.listdir(uploads_dir) 
+                                if f.startswith("uploaded_broll_") and 
+                                f.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png'))]
+                print(f"Available uploaded files: {uploaded_files}")
+                
+                # Sort uploaded files by their index
+                uploaded_files.sort(key=lambda x: int(x.replace("uploaded_broll_", "").split(".")[0]))
+                
+                # Create a mapping between ordered files and uploaded files
+                for i, original_name in enumerate(ordered_filenames):
+                    if i < len(uploaded_files):
+                        file_path = os.path.join(uploads_dir, uploaded_files[i])
+                        print(f"Mapping {original_name} -> {uploaded_files[i]}")
+                        if os.path.exists(file_path):
+                            broll_files.append(file_path)
+        else:
+            print("No order.json file found")
 
-        # If no uploaded files, use default
+        # Only add remaining files if no files were added from order.json
         if not broll_files:
+            print("2. No files from order.json, adding all uploaded files...")
+            for file in os.listdir(uploads_dir):
+                if (file.startswith("uploaded_broll_") and 
+                    file.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png'))):
+                    file_path = os.path.join(uploads_dir, file)
+                    broll_files.append(file_path)
+        
+        # If still no files, use default
+        if not broll_files:
+            print("3. No uploaded files found, using default placeholder")
             broll_files = ["src/placeholder-broll.mp4"]
+
+        print(f"\nFinal broll files order: {broll_files}\n")
 
         # Process each file
         processed_clips = []

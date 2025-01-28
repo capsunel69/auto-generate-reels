@@ -4,6 +4,7 @@ import os
 from flask import after_this_request, current_app
 import time
 import threading
+import json
 
 # Load environment variables from .env file
 load_dotenv()
@@ -214,6 +215,56 @@ def create_video():
                 #progress::-webkit-scrollbar-thumb:hover {
                     background: #94a3b8;
                 }
+
+                .file-preview {
+                    margin: 1rem 0;
+                    display: none;
+                }
+
+                .file-list {
+                    list-style: none;
+                    padding: 0;
+                    margin: 0;
+                }
+
+                .file-item {
+                    display: flex;
+                    align-items: center;
+                    padding: 0.5rem;
+                    margin: 0.25rem 0;
+                    background: #f8fafc;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.5rem;
+                    cursor: move;
+                }
+
+                .file-item:hover {
+                    background: #f1f5f9;
+                }
+
+                .file-item img {
+                    width: 60px;
+                    height: 60px;
+                    object-fit: cover;
+                    margin-right: 1rem;
+                    border-radius: 0.25rem;
+                }
+
+                .file-item .file-name {
+                    flex-grow: 1;
+                }
+
+                .file-item .remove-file {
+                    color: var(--error-color);
+                    cursor: pointer;
+                    padding: 0.25rem 0.5rem;
+                }
+
+                .drag-handle {
+                    cursor: move;
+                    padding: 0.5rem;
+                    color: var(--text-secondary);
+                }
             </style>
         </head>
         <body>
@@ -224,6 +275,10 @@ def create_video():
                         <label class="file-input-label">Upload B-roll Videos and Images (MP4, JPG, JPEG, PNG)</label>
                         <input type="file" name="broll" accept="video/mp4,image/jpeg,image/jpg,image/png" multiple required>
                     </div>
+                    <div class="file-preview">
+                        <h3>Uploaded Files (drag to reorder)</h3>
+                        <ul class="file-list" id="fileList"></ul>
+                    </div>
                     <textarea name="script" rows="10" cols="30" placeholder="Enter Romanian script here..." required></textarea><br>
                     <input type="submit" value="Create Video">
                 </form>
@@ -233,25 +288,87 @@ def create_video():
                 <div id="progress"></div>
                 <a href="/download" id="downloadBtn" class="download-btn">Download Video</a>
             </div>
+            <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
             <script>
+                // Initialize drag-and-drop functionality
+                new Sortable(document.getElementById('fileList'), {
+                    animation: 150,
+                    handle: '.drag-handle'
+                });
+
+                document.querySelector('input[type="file"]').addEventListener('change', function(e) {
+                    const fileList = document.getElementById('fileList');
+                    const filePreview = document.querySelector('.file-preview');
+                    fileList.innerHTML = '';
+                    filePreview.style.display = 'block';
+
+                    Array.from(e.target.files).forEach((file, index) => {
+                        const li = document.createElement('li');
+                        li.className = 'file-item';
+                        li.dataset.filename = file.name;
+                        
+                        const dragHandle = document.createElement('span');
+                        dragHandle.className = 'drag-handle';
+                        dragHandle.innerHTML = '⋮⋮';
+                        
+                        const preview = document.createElement(file.type.startsWith('video/') ? 'video' : 'img');
+                        if (file.type.startsWith('video/')) {
+                            preview.src = URL.createObjectURL(file);
+                            preview.style.width = '60px';
+                            preview.style.height = '60px';
+                        } else {
+                            preview.src = URL.createObjectURL(file);
+                        }
+                        
+                        const fileName = document.createElement('span');
+                        fileName.className = 'file-name';
+                        fileName.textContent = file.name;
+                        
+                        const removeBtn = document.createElement('span');
+                        removeBtn.className = 'remove-file';
+                        removeBtn.textContent = '×';
+                        removeBtn.onclick = function() {
+                            li.remove();
+                            if (fileList.children.length === 0) {
+                                filePreview.style.display = 'none';
+                            }
+                        };
+                        
+                        li.appendChild(dragHandle);
+                        li.appendChild(preview);
+                        li.appendChild(fileName);
+                        li.appendChild(removeBtn);
+                        fileList.appendChild(li);
+                    });
+                });
+
                 document.getElementById('videoForm').onsubmit = function(event) {
                     event.preventDefault();
                     const form = event.target;
+                    const fileList = document.getElementById('fileList');
+                    const formData = new FormData(form);
+
+                    // Get the actual order of files after drag and drop
+                    const fileOrder = Array.from(fileList.children).map((li, newIndex) => {
+                        const originalName = li.dataset.filename;
+                        const ext = originalName.substring(originalName.lastIndexOf('.'));
+                        return `uploaded_broll_${newIndex}${ext}`;
+                    });
+
+                    formData.append('file_order', JSON.stringify(fileOrder));
+
+                    // Reset and show progress elements
                     const progressDiv = document.getElementById('progress');
                     const progressBar = document.querySelector('.progress-bar');
                     const progressBarFill = document.querySelector('.progress-bar-fill');
                     const downloadBtn = document.getElementById('downloadBtn');
 
-                    // Reset and show progress elements
                     progressDiv.style.display = 'block';
                     progressBar.style.display = 'block';
                     progressDiv.innerHTML = '';
                     progressBarFill.style.width = '0%';
                     downloadBtn.style.display = 'none';
 
-                    // Create FormData object to handle file upload
-                    const formData = new FormData(form);
-                    
                     // Upload the files first
                     fetch('/upload', {
                         method: 'POST',
@@ -320,13 +437,50 @@ def upload_file():
             except:
                 pass
     
-    # Save the new files
-    for i, file in enumerate(files):
+    # Get the file order from the form data
+    file_order = json.loads(request.form.get('file_order', '[]'))
+    print("Received file order:", file_order)
+    
+    # First, save all files with temporary names
+    temp_files = {}
+    for file in files:
         if file and file.filename.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png')):
-            # Keep the original file extension
-            ext = os.path.splitext(file.filename)[1].lower()
-            file_path = os.path.join(upload_path, f'uploaded_broll_{i}{ext}')
+            temp_name = f'temp_{file.filename}'
+            file_path = os.path.join(upload_path, temp_name)
             file.save(file_path)
+            temp_files[file.filename] = temp_name
+    
+    # Then rename them according to the order
+    saved_files = []
+    used_files = set()
+    
+    for i, ordered_filename in enumerate(file_order):
+        ext = ordered_filename.split('.')[-1]
+        # Find the original file that matches this extension and hasn't been used
+        for original_name, temp_name in temp_files.items():
+            if original_name.lower().endswith(ext) and original_name not in used_files:
+                old_path = os.path.join(upload_path, temp_name)
+                new_filename = f'uploaded_broll_{i}.{ext}'
+                new_path = os.path.join(upload_path, new_filename)
+                
+                if os.path.exists(old_path):
+                    os.rename(old_path, new_path)
+                    saved_files.append(new_filename)
+                    used_files.add(original_name)
+                    print(f"Renamed {temp_name} to {new_filename}")
+                break
+    
+    # Clean up any remaining temporary files
+    for temp_name in temp_files.values():
+        temp_path = os.path.join(upload_path, temp_name)
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    
+    print("Final saved files:", saved_files)
+    
+    # Save the file order
+    with open(os.path.join(upload_path, 'order.json'), 'w') as f:
+        json.dump(saved_files, f)
     
     return jsonify({'success': True})
 
