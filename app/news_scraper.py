@@ -39,7 +39,7 @@ def scrape_news_content(url):
     except Exception as e:
         raise Exception(f"Failed to scrape the URL: {str(e)}")
 
-def generate_tiktok_script(article_data):
+def generate_tiktok_script(article_data, custom_prompt=None):
     """Generate a TikTok script using OpenAI based on the article content."""
     try:
         client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -48,7 +48,8 @@ def generate_tiktok_script(article_data):
         print(f"Article title: {article_data['title']}")
         print(f"Content length: {len(article_data['content'])} characters")
         
-        prompt = f"""
+        # Use the custom prompt if provided, otherwise use the default
+        prompt = custom_prompt if custom_prompt else f"""
         Title: {article_data['title']}
         Content: {article_data['content'][:1000]}  # Limiting content length for API
         
@@ -75,7 +76,7 @@ def generate_tiktok_script(article_data):
                 {"role": "system", "content": "You are a skilled Romanian news script writer for social media, specialized in creating viral hooks."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=100,
+            max_tokens=5000,
             # Controls randomness in the output (0.0 = deterministic, 1.0 = most random)
             temperature=0.7  # Balanced between creativity and consistency
         )

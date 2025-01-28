@@ -582,8 +582,35 @@ def download_video():
         current_app.logger.error(f"Download error: {e}")
         return str(e), 404
 
-@app.route('/scraper', methods=['GET'])
+@app.route('/scraper', methods=['GET', 'POST'])
 def scraper():
+    if request.method == 'POST':
+        data = request.get_json()
+        url = data.get('url')
+        custom_prompt = data.get('custom_prompt')
+        if not url:
+            return jsonify({'success': False, 'error': 'No URL provided'})
+        
+        from news_scraper import create_news_script
+        script = create_news_script(url, custom_prompt)
+        return jsonify({'success': True, 'script': script})
+    
+    # Initial prompt from news_scraper.py
+    initial_prompt = """
+    Create a short, engaging script in Romanian for a TikTok news video (30-60 seconds). 
+    The script should:
+    - Start with an extremely captivating hook in the first 3 seconds
+    - Use pattern interrupts or shocking facts to grab attention
+    - Be conversational and engaging
+    - Focus on the most important facts
+    - Be clear and concise
+    - Use simple Romanian language that's easy to understand
+    - Be around 100-150 words
+    - Only include the script text, no suggestions or additional formatting
+    
+    Important: The entire response must be in Romanian language.
+    """
+    
     return render_template_string('''
         <!doctype html>
         <html lang="en">
@@ -634,18 +661,28 @@ def scraper():
                     color: var(--text-primary);
                 }
 
-                input[type="url"] {
+                .form-group {
+                    margin-bottom: 1.5rem;
+                }
+
+                label {
+                    display: block;
+                    margin-bottom: 0.5rem;
+                    font-weight: 500;
+                    color: var(--text-secondary);
+                }
+
+                input[type="url"], textarea {
                     width: 100%;
-                    margin-bottom: 1rem;
+                    padding: 0.75rem;
                     border: 1px solid #e5e7eb;
                     border-radius: 0.5rem;
                     font-size: 1rem;
                     transition: border-color 0.15s ease-in-out;
-                    padding: 0.75rem;
                     box-sizing: border-box;
                 }
 
-                input[type="url"]:focus {
+                input[type="url"]:focus, textarea:focus {
                     outline: none;
                     border-color: var(--primary-color);
                     box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
@@ -667,6 +704,43 @@ def scraper():
                     background-color: var(--primary-hover);
                 }
 
+                .nav-menu {
+                    display: flex;
+                    justify-content: center;
+                    gap: 1rem;
+                    margin-bottom: 2rem;
+                }
+
+                .nav-link {
+                    padding: 0.5rem 1rem;
+                    text-decoration: none;
+                    color: var(--text-primary);
+                    background-color: var(--card-bg);
+                    border-radius: 0.5rem;
+                    transition: all 0.15s ease-in-out;
+                    border: 1px solid #e5e7eb;
+                }
+
+                .nav-link:hover {
+                    background-color: var(--primary-color);
+                    color: white;
+                }
+
+                .nav-link.active {
+                    background-color: var(--primary-color);
+                    color: white;
+                }
+                
+                                .success-message {
+                    color: var(--success-color);
+                    font-weight: 500;
+                }
+
+                .error-message {
+                    color: var(--error-color);
+                    font-weight: 500;
+                }
+                
                 #progress {
                     margin-top: 1.5rem;
                     font-size: 0.875rem;
@@ -714,43 +788,6 @@ def scraper():
                 .use-script-btn:hover {
                     background-color: var(--success-hover);
                 }
-
-                .nav-menu {
-                    display: flex;
-                    justify-content: center;
-                    gap: 1rem;
-                    margin-bottom: 2rem;
-                }
-
-                .nav-link {
-                    padding: 0.5rem 1rem;
-                    text-decoration: none;
-                    color: var(--text-primary);
-                    background-color: var(--card-bg);
-                    border-radius: 0.5rem;
-                    transition: all 0.15s ease-in-out;
-                    border: 1px solid #e5e7eb;
-                }
-
-                .nav-link:hover {
-                    background-color: var(--primary-color);
-                    color: white;
-                }
-
-                .nav-link.active {
-                    background-color: var(--primary-color);
-                    color: white;
-                }
-
-                .success-message {
-                    color: var(--success-color);
-                    font-weight: 500;
-                }
-
-                .error-message {
-                    color: var(--error-color);
-                    font-weight: 500;
-                }
             </style>
         </head>
         <body>
@@ -762,7 +799,14 @@ def scraper():
                 </div>
                 <h1>News Article Scraper</h1>
                 <form id="scraperForm">
-                    <input type="url" name="url" placeholder="Enter news article URL..." required>
+                    <div class="form-group">
+                        <label for="url">News Article URL:</label>
+                        <input type="url" name="url" placeholder="Enter news article URL..." required>
+                    </div>
+                    <div class="form-group">
+                        <label for="customPrompt">Customize OpenAI Prompt:</label>
+                        <textarea name="custom_prompt" id="customPrompt" rows="10">{{ initial_prompt }}</textarea>
+                    </div>
                     <input type="submit" value="Generate Script">
                 </form>
                 <div id="progress" style="display: none;"></div>
@@ -774,6 +818,7 @@ def scraper():
                     e.preventDefault();
                     const form = e.target;
                     const url = form.url.value;
+                    const customPrompt = form.customPrompt.value;
                     const progress = document.getElementById('progress');
                     const result = document.getElementById('result');
                     const useScriptBtn = document.getElementById('useScript');
@@ -790,14 +835,14 @@ def scraper():
                             headers: {
                                 'Content-Type': 'application/json',
                             },
-                            body: JSON.stringify({ url: url })
+                            body: JSON.stringify({ url: url, custom_prompt: customPrompt })
                         });
                         
                         const data = await response.json();
                         if (data.success) {
                             progress.innerHTML = '<span class="success-message">Script generated successfully!</span>';
                             result.style.display = 'block';
-                            result.value = data.script;
+                            result.value = data.script.slice(1, -1);
                             useScriptBtn.style.display = 'block';
                         } else {
                             progress.innerHTML = '<span class="error-message">Error: ' + data.error + '</span>';
@@ -817,7 +862,7 @@ def scraper():
             </script>
         </body>
         </html>
-    ''')
+    ''', initial_prompt=initial_prompt)
 
 @app.route('/scrape', methods=['POST'])
 def scrape():
