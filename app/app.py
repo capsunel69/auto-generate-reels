@@ -311,7 +311,7 @@ def create_video():
                         <h3>Uploaded Files (drag to reorder)</h3>
                         <ul class="file-list" id="fileList"></ul>
                     </div>
-                    <textarea name="script" rows="10" cols="30" placeholder="Enter Romanian script here..." required></textarea><br>
+                    <textarea name="script" id="scriptInput" rows="10" cols="30" placeholder="Enter Romanian script here..." required></textarea><br>
                     <input type="submit" value="Create Video">
                 </form>
                 <div class="progress-bar">
@@ -443,6 +443,17 @@ def create_video():
                     .catch(error => {
                         progressDiv.innerHTML += '<br><span class="error-message">Upload failed: ' + error.message + '</span>';
                     });
+                };
+
+                // Add this at the start of your script section
+                window.onload = function() {
+                    // Check if there's a transferred script
+                    const transferredScript = localStorage.getItem('transferScript');
+                    if (transferredScript) {
+                        document.getElementById('scriptInput').value = transferredScript;
+                        // Clear the stored script
+                        localStorage.removeItem('transferScript');
+                    }
                 };
             </script>
         </body>
@@ -668,32 +679,40 @@ def scraper():
 
                 #result {
                     margin-top: 1.5rem;
+                    width: 100%;
                     font-size: 0.875rem;
                     color: var(--text-primary);
                     background-color: #f8fafc;
                     border-radius: 0.5rem;
                     padding: 1rem;
                     border: 1px solid #e5e7eb;
-                    max-height: 400px;
-                    overflow-y: auto;
+                    min-height: 200px;
+                    resize: vertical;
+                    box-sizing: border-box;
                 }
 
-                #result::-webkit-scrollbar {
-                    width: 8px;
+                #result:focus {
+                    outline: none;
+                    border-color: var(--primary-color);
+                    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
                 }
 
-                #result::-webkit-scrollbar-track {
-                    background: #f1f1f1;
-                    border-radius: 4px;
+                .use-script-btn {
+                    display: none;
+                    background-color: var(--success-color);
+                    color: white;
+                    padding: 0.75rem 1.5rem;
+                    border: none;
+                    border-radius: 0.5rem;
+                    font-weight: 500;
+                    cursor: pointer;
+                    transition: background-color 0.15s ease-in-out;
+                    width: 100%;
+                    margin-top: 1rem;
                 }
 
-                #result::-webkit-scrollbar-thumb {
-                    background: #cbd5e1;
-                    border-radius: 4px;
-                }
-
-                #result::-webkit-scrollbar-thumb:hover {
-                    background: #94a3b8;
+                .use-script-btn:hover {
+                    background-color: var(--success-hover);
                 }
 
                 .nav-menu {
@@ -747,7 +766,8 @@ def scraper():
                     <input type="submit" value="Generate Script">
                 </form>
                 <div id="progress" style="display: none;"></div>
-                <div id="result" style="display: none;"></div>
+                <textarea id="result" style="display: none;" rows="10"></textarea>
+                <button id="useScript" style="display: none;" class="use-script-btn">Use Script in Video Creator</button>
             </div>
             <script>
                 document.getElementById('scraperForm').onsubmit = async function(e) {
@@ -756,11 +776,13 @@ def scraper():
                     const url = form.url.value;
                     const progress = document.getElementById('progress');
                     const result = document.getElementById('result');
+                    const useScriptBtn = document.getElementById('useScript');
                     
                     progress.style.display = 'block';
                     progress.innerHTML = '<span class="success-message">Generating script...</span>';
                     result.style.display = 'none';
-                    result.innerHTML = '';
+                    result.value = '';
+                    useScriptBtn.style.display = 'none';
                     
                     try {
                         const response = await fetch('/scrape', {
@@ -775,13 +797,22 @@ def scraper():
                         if (data.success) {
                             progress.innerHTML = '<span class="success-message">Script generated successfully!</span>';
                             result.style.display = 'block';
-                            result.innerHTML = data.script;
+                            result.value = data.script;
+                            useScriptBtn.style.display = 'block';
                         } else {
                             progress.innerHTML = '<span class="error-message">Error: ' + data.error + '</span>';
                         }
                     } catch (error) {
                         progress.innerHTML = '<span class="error-message">Error: ' + error.message + '</span>';
                     }
+                };
+
+                document.getElementById('useScript').onclick = function() {
+                    const script = document.getElementById('result').value;
+                    // Store the script in localStorage
+                    localStorage.setItem('transferScript', script);
+                    // Redirect to video creator
+                    window.location.href = '/video-creator';
                 };
             </script>
         </body>
