@@ -1,0 +1,5 @@
+To install the packages, run the following command:
+pip install -r requirements.txt
+
+Too freeze current packages, run the following command:
+pip freeze > requirements.txt
