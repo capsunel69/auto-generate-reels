@@ -272,7 +272,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
         if not ELEVENLABS_API_KEY:
             raise ValueError("ELEVENLABS_API_KEY is not set in environment variables.")
         
-        VOICE_ID = "SWN0Y4Js5I9UJiF9VqEP"
+        VOICE_ID = "gbLy9ep70G3JW53cTzFC"
         SUBTITLE_GAP = 0
         
         # Initialize ElevenLabs client
@@ -515,7 +515,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default, Montserrat, 72, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 1, 0, 0, 0, 100, 100, 0, 0, 1, 3, 5, 2, 150, 150, 30, 1
+Style: Default, Montserrat-Bold, 72, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 1, 0, 0, 0, 100, 100, 1, 0, 1, 5, 0, 2, 150, 150, 30, 1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -540,9 +540,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for sub in subs:
         start_time = srt_time_to_ass_time(sub.start)
         end_time = srt_time_to_ass_time(sub.end)
-        text = sub.text.replace('\n', '\\N')  # ASS line breaks
+        text = sub.text.replace('\n', '\\N').upper()  # ASS line breaks and uppercase text
         
-        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(200,200)\\move(540,1300,540,1200)\\q1\\w8}}{text}\n"
+        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(150,150)\\move(540,1220,540,1200,0,300)\\t(0,130,\\alpha&H00&\\fscy110)\\t(300,600,\\fscy100)}}{text}\n"
     
     # Save ASS file
     ass_file = "subtitles.ass"
