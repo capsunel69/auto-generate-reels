@@ -506,16 +506,32 @@ def create_romanian_video(romanian_script, progress_callback=None):
 
 def create_subtitle_clips(srt_file, videosize):
     """Convert SRT to ASS and create styled subtitles"""
-    ass_content = """[Script Info]
+    # Get the absolute path to the font file and ensure proper path formatting
+    font_path = os.path.abspath(os.path.join('src', 'fonts', 'Montserrat-Black.ttf'))
+    font_path = font_path.replace('\\', '/')
+    
+    # Verify font exists
+    if not os.path.exists(font_path):
+        print(f"Warning: Font not found at {font_path}, falling back to Arial")
+        font_name = "Arial"
+    else:
+        print(f"Using font from: {font_path}")
+        font_name = "Montserrat-Black"
+
+    ass_content = f"""[Script Info]
 Title: Romanian Video Subtitles
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
 WrapStyle: 2
 
+[Fonts]
+fontname: Montserrat-Black
+filename: {font_path}
+
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default, Montserrat-Bold, 72, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 1, 0, 0, 0, 100, 100, 1, 0, 1, 5, 0, 2, 150, 150, 30, 1
+Style: Default,Montserrat-Black,72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,0,2,150,150,30,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -542,7 +558,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end_time = srt_time_to_ass_time(sub.end)
         text = sub.text.replace('\n', '\\N').upper()  # ASS line breaks and uppercase text
         
-        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(150,150)\\move(540,1220,540,1200,0,300)\\t(0,130,\\alpha&H00&\\fscy110)\\t(300,600,\\fscy100)}}{text}\n"
+        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(150,150)\\move(540,1010,540,1000,0,100)\\t(0,130,\\alpha&H00&\\fscy110)\\t(300,600,\\fscy100)}}{text}\n"
     
     # Save ASS file
     ass_file = "subtitles.ass"
