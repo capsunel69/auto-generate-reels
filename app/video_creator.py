@@ -18,6 +18,8 @@ import wave
 from difflib import SequenceMatcher
 from skimage.transform import resize
 import json
+import subprocess
+import threading
 
 # Set the path to your Google Cloud credentials JSON file
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'dogwood-boulder-392113-d8917a17686f.json'
@@ -256,15 +258,265 @@ def create_clip_from_image(image_path, duration=5):
     # Create the clip with the new frame generator
     return VideoClip(make_frame, duration=duration)
 
-def create_romanian_video(romanian_script, progress_callback=None):
+def create_user_directory(session_id):
+    """Create a unique working directory for each user session"""
+    user_dir = os.path.join('user_sessions', session_id)
+    uploads_dir = os.path.join(user_dir, 'uploads')
+    os.makedirs(uploads_dir, exist_ok=True)
+    return user_dir, uploads_dir
+
+def srt_time_to_ass_time(srt_time):
+    """Convert SRT time format to ASS time format"""
+    hours = srt_time.hours
+    minutes = srt_time.minutes
+    seconds = srt_time.seconds
+    milliseconds = srt_time.milliseconds
+    
+    # Format to ASS time format (H:MM:SS.cc)
+    return f"{hours}:{minutes:02d}:{seconds:02d}.{milliseconds//10:02d}"
+
+def create_subtitle_clips(srt_file, videosize, user_dir):
+    """Convert SRT to ASS and create styled subtitles"""
+    try:
+        # Get the absolute path to the font file and ensure proper path formatting
+        font_path = os.path.abspath(os.path.join('src', 'fonts', 'Montserrat-Black.ttf'))
+        font_path = font_path.replace('\\', '/')
+        
+        # Verify font exists
+        if not os.path.exists(font_path):
+            print(f"Warning: Font not found at {font_path}, falling back to Arial")
+            font_name = "Arial"
+        else:
+            print(f"Using font from: {font_path}")
+            font_name = "Montserrat-Black"
+
+        # Create ASS file in user directory
+        ass_file = os.path.join(user_dir, "subtitles.ass")
+        
+        ass_content = f"""[Script Info]
+Title: Romanian Video Subtitles
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{font_name},72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,0,2,150,150,30,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        
+        subs = pysrt.open(srt_file)
+        
+        for sub in subs:
+            start_time = srt_time_to_ass_time(sub.start)
+            end_time = srt_time_to_ass_time(sub.end)
+            text = sub.text.upper()
+            words = text.split()
+            lines = []
+            current_line = []
+            current_length = 0
+            
+            for word in words:
+                if current_length + len(word) > 30:
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+                    current_length = len(word)
+                else:
+                    current_line.append(word)
+                    current_length += len(word) + 1
+            
+            if current_line:
+                lines.append(' '.join(current_line))
+            
+            text = '\\N'.join(lines)
+            
+            ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(150,150)\\pos(540,1000)\\t(0,130,\\alpha&H00&\\fscy110)\\t(300,600,\\fscy100)}}{text}\n"
+        
+        # Save ASS file to user directory
+        with open(ass_file, "w", encoding="utf-8") as f:
+            f.write(ass_content)
+        
+        print(f"Created ASS file at: {ass_file}")
+        return ass_file
+
+    except Exception as e:
+        print(f"Error in create_subtitle_clips: {str(e)}")
+        return None
+
+def create_styled_subtitles(video_input, ass_file, user_dir, session_id):
+    """Apply ASS subtitles using FFmpeg"""
+    try:
+        # Ensure paths are properly formatted and escaped
+        video_input = os.path.normpath(video_input).replace('\\', '/')
+        ass_file = os.path.normpath(ass_file).replace('\\', '/')
+        output_filename = os.path.normpath(os.path.join(user_dir, f"final_video_with_subs_{session_id}.mp4")).replace('\\', '/')
+
+        # Add debug logging
+        print(f"Creating final video:")
+        print(f"- Input video: {video_input}")
+        print(f"- ASS file: {ass_file}")
+        print(f"- Output path: {output_filename}")
+        print(f"- User directory: {user_dir}")
+
+        # Verify files exist
+        if not os.path.exists(video_input):
+            raise Exception(f"Input video not found: {video_input}")
+        if not os.path.exists(ass_file):
+            raise Exception(f"ASS subtitle file not found: {ass_file}")
+
+        print(f"Video input path: {video_input}")
+        print(f"ASS file path: {ass_file}")
+        print(f"Output path: {output_filename}")
+
+        # Create FFmpeg command with proper path escaping
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', video_input,
+            '-vf', f"ass='{ass_file}'",  # Wrap the ass file path in quotes
+            '-c:v', 'libx264',  # Explicitly specify video codec
+            '-c:a', 'copy',     # Copy audio stream
+            '-preset', 'fast',   # Use fast encoding preset
+            output_filename
+        ]
+
+        # Join command for logging
+        cmd_str = ' '.join(cmd)
+        print(f"Executing FFmpeg command: {cmd_str}")
+
+        # Execute FFmpeg command
+        process = subprocess.Popen(
+            cmd_str,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            universal_newlines=True
+        )
+        
+        stdout, stderr = process.communicate()
+        
+        if process.returncode != 0:
+            print("FFmpeg stdout:", stdout)
+            print("FFmpeg stderr:", stderr)
+            raise Exception(f"FFmpeg failed with error: {stderr}")
+
+        # Verify output was created
+        if not os.path.exists(output_filename):
+            raise Exception("Output file was not created")
+
+        print(f"Video with styled subtitles created as {output_filename}")
+        return output_filename
+
+    except Exception as e:
+        print(f"Error in create_styled_subtitles: {str(e)}")
+        # If something goes wrong, return the original video
+        return video_input
+
+def cleanup_user_files(user_dir, final_output):
+    """Clean up temporary files for a user session"""
+    try:
+        # Keep final output file, remove everything else
+        for root, dirs, files in os.walk(user_dir, topdown=False):
+            for name in files:
+                file_path = os.path.join(root, name)
+                # Don't delete the final video, order.json, or filename_mapping.json
+                if (file_path != final_output and 
+                    not file_path.endswith('order.json') and 
+                    not file_path.endswith('filename_mapping.json')):
+                    try:
+                        # Force Python to release any handles it might have
+                        import gc
+                        gc.collect()
+                        
+                        os.remove(file_path)
+                        print(f"Cleaned up: {file_path}")
+                    except Exception as e:
+                        print(f"Warning: Could not delete {file_path}: {str(e)}")
+            
+            # Try to remove empty directories except the user directory itself
+            for name in dirs:
+                try:
+                    dir_path = os.path.join(root, name)
+                    if dir_path != user_dir:  # Don't remove the main user directory
+                        os.rmdir(dir_path)
+                        print(f"Removed empty directory: {dir_path}")
+                except Exception as e:
+                    print(f"Warning: Could not remove directory {dir_path}: {str(e)}")
+    
+    except Exception as e:
+        print(f"Error during cleanup: {str(e)}")
+
+def delayed_cleanup(file_path, delay=5):
+    """Attempt to delete a file after a delay with multiple retries."""
+    def cleanup():
+        # First delay to let initial processes finish
+        time.sleep(delay)
+        
+        # Try up to 3 times with increasing delays
+        for attempt in range(3):
+            try:
+                if os.path.exists(file_path):
+                    # Force Python to release any handles it might have
+                    import gc
+                    gc.collect()
+                    
+                    os.remove(file_path)
+                    print(f"File {file_path} cleaned up successfully on attempt {attempt + 1}")
+                    
+                    # Also try to remove the parent directory if it's empty
+                    parent_dir = os.path.dirname(file_path)
+                    try:
+                        if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                            os.rmdir(parent_dir)
+                            print(f"Removed empty directory: {parent_dir}")
+                    except Exception as e:
+                        print(f"Warning: Could not remove directory {parent_dir}: {str(e)}")
+                    break
+                else:
+                    print(f"File {file_path} already deleted")
+                    break
+            except Exception as e:
+                print(f"Cleanup attempt {attempt + 1} failed for {file_path}: {e}")
+                time.sleep(delay * (attempt + 1))  # Increase delay with each attempt
+
+    threading.Thread(target=cleanup).start()
+
+def cleanup_broll():
     """
-    Generates the final video with Romanian script, audio, 
-    and subtitles. Returns True if successful.
+    Manually called after user has finished downloading or viewing
+    the final video. This tries to delete all uploaded b-roll files.
     """
-    parkour_video = None
-    clips = []
-    final_clip = None
-    audio_clip = None
+    print("Attempting to clean up b-roll...")
+    uploads_dir = "uploads"
+    
+    # Define allowed file extensions
+    allowed_extensions = ('.mp4', '.jpg', '.jpeg', '.png')
+    
+    for file in os.listdir(uploads_dir):
+        if file.startswith("uploaded_broll_") and file.lower().endswith(allowed_extensions):
+            file_path = os.path.join(uploads_dir, file)
+            # Try multiple times with delays
+            for attempt in range(3):
+                try:
+                    time.sleep(2)  # Wait for file handles to be released
+                    os.remove(file_path)
+                    print(f"Uploaded b-roll {file} cleaned up successfully")
+                    break
+                except Exception as e:
+                    if attempt == 2:  # Only print error on last attempt
+                        print(f"Warning: Could not delete uploaded b-roll {file}: {str(e)}")
+
+def create_romanian_video(romanian_script, session_id, progress_callback=None):
+    """Modified to use session-specific directories"""
+    user_dir, uploads_dir = create_user_directory(session_id)
+    
+    # Update all file paths to use user directory and include session_id in final filenames
+    audio_path = os.path.join(user_dir, "audio_file.mp3")
+    srt_path = os.path.join(user_dir, "sub_file.srt")
+    output_path = os.path.join(user_dir, "final_clip_file.mp4")
+    final_output = os.path.join(user_dir, f"final_video_with_subs_{session_id}.mp4")
     
     try:
         # Retrieve your ElevenLabs API key from an environment variable
@@ -295,7 +547,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
         )
         
         # Save the streaming audio
-        with open("audio_file.mp3", "wb") as file:
+        with open(audio_path, "wb") as file:
             for chunk in audio_stream:
                 if isinstance(chunk, bytes):
                     file.write(chunk)
@@ -313,7 +565,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
         print("Generating subtitles...")
         
         # Get word-level timestamps from Google Cloud
-        words_with_times = get_word_timestamps_from_google("audio_file.mp3")
+        words_with_times = get_word_timestamps_from_google(audio_path)
         
         # Align the original script with the recognized words
         aligned_words = align_texts(romanian_script, words_with_times)
@@ -322,18 +574,17 @@ def create_romanian_video(romanian_script, progress_callback=None):
         srt_content = create_grouped_srt(aligned_words, max_words=4)
         
         # Save the processed SRT file
-        with open("sub_file.srt", "w", encoding="utf-8") as f:
+        with open(srt_path, "w", encoding="utf-8") as f:
             f.write(srt_content)
 
         if progress_callback:
             yield from progress_callback("Creating video...|50")
         print("Creating video...")
-        audio_clip = AudioFileClip("audio_file.mp3")
+        audio_clip = AudioFileClip(audio_path)
         total_duration = audio_clip.duration
 
-        # Get all uploaded broll files (now including images)
+        # Update broll file handling
         broll_files = []
-        uploads_dir = "uploads"
         order_file = os.path.join(uploads_dir, "order.json")
         
         # First check if order.json exists and use its order
@@ -432,43 +683,41 @@ def create_romanian_video(romanian_script, progress_callback=None):
                 
         sse_logger = SSELogger(sse_callback=sse_callback)
         
-        output_filename = "final_clip_file.mp4"
         yield from progress_callback("Rendering video (it may take a while)...|60")
         final_clip.write_videofile(
-            output_filename,
+            output_path,
             fps=30,
             logger='bar'
         )
 
-        # Then add subtitles if they exist
-        if os.path.exists("sub_file.srt"):
+        # Update subtitle creation to use user directory
+        if os.path.exists(srt_path):
             if progress_callback:
                 yield from progress_callback("Adding styled subtitles...|90")
             print("Adding styled subtitles...")
-            ass_file = create_subtitle_clips("sub_file.srt", (1080, 1920))
-            final_output = create_styled_subtitles(output_filename, ass_file)
-            
-            # Clean up temporary files only after successful creation
-            if os.path.exists(final_output):
-                os.remove(output_filename)  # Remove the non-subtitled version
-                os.remove(ass_file)  # Remove the temporary subtitle file
-                os.remove("audio_file.mp3")  # Remove the temporary audio file
-                os.remove("sub_file.srt")  # Remove the temporary subtitle file
+            ass_file = create_subtitle_clips(srt_path, (1080, 1920), user_dir)
+            if ass_file and os.path.exists(ass_file):
+                final_output = create_styled_subtitles(output_path, ass_file, user_dir, session_id)
+                
+                # Clean up temporary files only after successful creation
+                if os.path.exists(final_output):
+                    try:
+                        os.remove(output_path)  # Remove the non-subtitled version
+                        os.remove(ass_file)  # Remove the temporary subtitle file
+                        os.remove(audio_path)  # Remove the temporary audio file
+                        os.remove(srt_path)  # Remove the temporary subtitle file
+                    except Exception as e:
+                        print(f"Warning: Could not remove temporary files: {str(e)}")
+            else:
+                print("Failed to create subtitle file, using video without subtitles")
+                final_output = output_path
 
         # Let the user see the "download" button
-        # we pass 100% progress so the user knows we are finished
         if progress_callback:
             yield from progress_callback("Video creation complete! |100")
         print("Video creation complete!")
 
         # Clean up the clip resources before returning
-        if parkour_video:
-            parkour_video.close()
-        for clip in clips:
-            try:
-                clip.close()
-            except:
-                pass
         if final_clip:
             final_clip.close()
         if audio_clip:
@@ -486,22 +735,12 @@ def create_romanian_video(romanian_script, progress_callback=None):
     finally:
         # Ensure all resources are closed in the finally block
         try:
-            if parkour_video:
-                parkour_video.close()
-        except:
-            pass
-        for clip in clips:
-            try:
-                clip.close()
-            except:
-                pass
-        try:
-            if final_clip:
+            if 'final_clip' in locals() and final_clip:
                 final_clip.close()
         except:
             pass
         try:
-            if audio_clip:
+            if 'audio_clip' in locals() and audio_clip:
                 audio_clip.close()
         except:
             pass
@@ -510,120 +749,8 @@ def create_romanian_video(romanian_script, progress_callback=None):
         import gc
         gc.collect()
 
-def create_subtitle_clips(srt_file, videosize):
-    """Convert SRT to ASS and create styled subtitles"""
-    # Get the absolute path to the font file and ensure proper path formatting
-    font_path = os.path.abspath(os.path.join('src', 'fonts', 'Montserrat-Black.ttf'))
-    font_path = font_path.replace('\\', '/')
-    
-    # Verify font exists
-    if not os.path.exists(font_path):
-        print(f"Warning: Font not found at {font_path}, falling back to Arial")
-        font_name = "Arial"
-    else:
-        print(f"Using font from: {font_path}")
-        font_name = "Montserrat-Black"
-
-    ass_content = f"""[Script Info]
-Title: Romanian Video Subtitles
-ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
-WrapStyle: 2
-
-[Fonts]
-fontname: Montserrat-Black
-filename: {font_path}
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Montserrat-Black,72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,0,2,150,150,30,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-    
-    subs = pysrt.open(srt_file)
-    
-    def srt_time_to_ass_time(td):
-        """Convert SubRipTime to ASS time format"""
-        total_milliseconds = (td.hours * 3600000 + 
-                            td.minutes * 60000 + 
-                            td.seconds * 1000 + 
-                            td.milliseconds)
-        
-        hours = int(total_milliseconds // 3600000)
-        minutes = int((total_milliseconds % 3600000) // 60000)
-        seconds = int((total_milliseconds % 60000) // 1000)
-        centiseconds = int((total_milliseconds % 1000) // 10)
-        
-        return f"{hours:01d}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
-    
-    for sub in subs:
-        start_time = srt_time_to_ass_time(sub.start)
-        end_time = srt_time_to_ass_time(sub.end)
-        # Add explicit line wrapping with \N for every 30 characters approximately
-        text = sub.text.upper()
-        words = text.split()
-        lines = []
-        current_line = []
-        current_length = 0
-        
-        for word in words:
-            if current_length + len(word) > 30:
-                lines.append(' '.join(current_line))
-                current_line = [word]
-                current_length = len(word)
-            else:
-                current_line.append(word)
-                current_length += len(word) + 1
-        
-        if current_line:
-            lines.append(' '.join(current_line))
-        
-        text = '\\N'.join(lines)
-        
-        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(150,150)\\pos(540,1000)\\t(0,130,\\alpha&H00&\\fscy110)\\t(300,600,\\fscy100)}}{text}\n"
-    
-    # Save ASS file
-    ass_file = "subtitles.ass"
-    with open(ass_file, "w", encoding="utf-8") as f:
-        f.write(ass_content)
-    
-    return ass_file
-
-def create_styled_subtitles(video_input, ass_file):
-    """Apply ASS subtitles using FFmpeg"""
-    output_filename = "final_video_with_subs.mp4"
-    # Added -strict -2 flag for better compatibility and -max_interleave_delta 0 for precise timing
-    os.system(f'ffmpeg -y -i {video_input} -vf "ass={ass_file}" -max_interleave_delta 0 -strict -2 -c:a copy {output_filename}')
-    print(f"Video with styled subtitles created as {output_filename}")
-    return output_filename
-
-def cleanup_broll():
-    """
-    Manually called after user has finished downloading or viewing
-    the final video. This tries to delete all uploaded b-roll files.
-    """
-    print("Attempting to clean up b-roll...")
-    uploads_dir = "uploads"
-    
-    # Define allowed file extensions
-    allowed_extensions = ('.mp4', '.jpg', '.jpeg', '.png')
-    
-    for file in os.listdir(uploads_dir):
-        if file.startswith("uploaded_broll_") and file.lower().endswith(allowed_extensions):
-            file_path = os.path.join(uploads_dir, file)
-            # Try multiple times with delays
-            for attempt in range(3):
-                try:
-                    time.sleep(2)  # Wait for file handles to be released
-                    os.remove(file_path)
-                    print(f"Uploaded b-roll {file} cleaned up successfully")
-                    break
-                except Exception as e:
-                    if attempt == 2:  # Only print error on last attempt
-                        print(f"Warning: Could not delete uploaded b-roll {file}: {str(e)}")
+        # Remove cleanup_user_files call from here
+        # We'll let the download route handle cleanup after successful download
 
 if __name__ == "__main__":
     create_romanian_video()

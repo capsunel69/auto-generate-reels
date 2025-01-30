@@ -1,22 +1,46 @@
 # app.py
 from dotenv import load_dotenv
 import os
-from flask import after_this_request, current_app
+from flask import after_this_request, current_app, session
 import time
 import threading
 import json
+import uuid
+from flask_session import Session
+from datetime import timedelta
 
 # Load environment variables from .env file
 load_dotenv()
 
 from flask import Flask, request, render_template_string, jsonify, send_file, Response
-from video_creator import create_romanian_video, cleanup_broll
+from video_creator import create_romanian_video, cleanup_broll, create_user_directory
 
 app = Flask(__name__)
+
+# Configure Flask-Session
+app.config.update(
+    SECRET_KEY=os.environ.get('FLASK_SECRET_KEY'),
+    SESSION_TYPE='filesystem',
+    SESSION_FILE_DIR='flask_session',  # Directory to store session files
+    PERMANENT_SESSION_LIFETIME=timedelta(days=1)  # Optional: set session lifetime
+)
+
+# Initialize Flask-Session
+Session(app)
+
+# Create session directory if it doesn't exist
+os.makedirs('flask_session', exist_ok=True)
+
+@app.before_request
+def before_request():
+    """Ensure each user has a unique session ID"""
+    if 'user_id' not in session:
+        session['user_id'] = str(uuid.uuid4())
 
 @app.route('/progress')
 def progress_stream():
     romanian_script = request.args.get('script', '')
+    session_id = session['user_id']
 
     def generate():
         def progress_callback(message):
@@ -24,7 +48,7 @@ def progress_stream():
 
         try:
             yield "data: Starting video creation...\n\n"
-            for message in create_romanian_video(romanian_script, progress_callback):
+            for message in create_romanian_video(romanian_script, session_id, progress_callback):
                 yield message
             yield "data: DONE\n\n"
         except Exception as e:
@@ -479,30 +503,27 @@ def upload_file():
     if not files or files[0].filename == '':
         return jsonify({'success': False, 'error': 'No files selected'})
     
-    upload_path = os.path.join(app.root_path, 'uploads')
-    os.makedirs(upload_path, exist_ok=True)
+    # Use session-specific upload directory
+    user_dir, uploads_dir = create_user_directory(session['user_id'])
     
     # Save files with sequential names and track original names
     saved_files = []
-    filename_mapping = {}  # Map original names to uploaded names
+    filename_mapping = {}
     
     for i, file in enumerate(files):
         if file and file.filename.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png')):
-            # Get the original file extension
             original_ext = os.path.splitext(file.filename)[1].lower()
-            # Use the original extension for the uploaded file
             uploaded_filename = f'uploaded_broll_{i}{original_ext}'
-            file_path = os.path.join(upload_path, uploaded_filename)
+            file_path = os.path.join(uploads_dir, uploaded_filename)
             file.save(file_path)
             saved_files.append(uploaded_filename)
             filename_mapping[file.filename] = uploaded_filename
-            print(f"Saved {file.filename} as {uploaded_filename}")
     
     # Save both the initial order and the filename mapping
-    with open(os.path.join(upload_path, 'order.json'), 'w') as f:
+    with open(os.path.join(uploads_dir, 'order.json'), 'w') as f:
         json.dump(saved_files, f)
     
-    with open(os.path.join(upload_path, 'filename_mapping.json'), 'w') as f:
+    with open(os.path.join(uploads_dir, 'filename_mapping.json'), 'w') as f:
         json.dump(filename_mapping, f)
     
     return jsonify({'success': True})
@@ -511,19 +532,19 @@ def upload_file():
 def reorder_files():
     """Handle reordering of already uploaded files"""
     try:
-        upload_path = os.path.join(app.root_path, 'uploads')
+        user_dir, uploads_dir = create_user_directory(session['user_id'])
         data = request.get_json()
         original_order = data.get('file_order', [])
         
         # Load the filename mapping
-        with open(os.path.join(upload_path, 'filename_mapping.json'), 'r') as f:
+        with open(os.path.join(uploads_dir, 'filename_mapping.json'), 'r') as f:
             filename_mapping = json.load(f)
         
         # Convert original filenames to uploaded filenames
         new_order = [filename_mapping[original_name] for original_name in original_order]
         
         # Save the new order
-        with open(os.path.join(upload_path, 'order.json'), 'w') as f:
+        with open(os.path.join(uploads_dir, 'order.json'), 'w') as f:
             json.dump(new_order, f)
         
         return jsonify({'success': True})
@@ -531,59 +552,97 @@ def reorder_files():
         print(f"Error during reordering: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
-def delayed_cleanup(file_path, delay=5):
-    """Attempt to delete a file after a delay with multiple retries."""
-    def cleanup():
-        with app.app_context():
-            # First delay to let initial processes finish
-            time.sleep(delay)
-            
-            # Try up to 3 times with increasing delays
-            for attempt in range(3):
-                try:
-                    if os.path.exists(file_path):
+def cleanup_user_files(user_dir, final_output):
+    """Clean up temporary files for a user session"""
+    try:
+        # Keep final output file, remove everything else
+        for root, dirs, files in os.walk(user_dir, topdown=False):
+            for name in files:
+                file_path = os.path.join(root, name)
+                if file_path != final_output:  # Don't delete the final video yet
+                    try:
                         # Force Python to release any handles it might have
                         import gc
                         gc.collect()
                         
                         os.remove(file_path)
-                        current_app.logger.info(f"File {file_path} cleaned up successfully on attempt {attempt + 1}")
-                        break
-                    else:
-                        current_app.logger.info(f"File {file_path} already deleted")
-                        break
+                        print(f"Cleaned up: {file_path}")
+                    except Exception as e:
+                        print(f"Warning: Could not delete {file_path}: {str(e)}")
+            
+            # Try to remove empty directories
+            for name in dirs:
+                try:
+                    dir_path = os.path.join(root, name)
+                    os.rmdir(dir_path)
+                    print(f"Removed empty directory: {dir_path}")
                 except Exception as e:
-                    current_app.logger.error(f"Cleanup attempt {attempt + 1} failed for {file_path}: {e}")
-                    time.sleep(delay * (attempt + 1))  # Increase delay with each attempt
+                    print(f"Warning: Could not remove directory {dir_path}: {str(e)}")
+    
+    except Exception as e:
+        print(f"Error during cleanup: {str(e)}")
+
+def delayed_cleanup(file_path, delay=5):
+    """Attempt to delete a file after a delay with multiple retries."""
+    def cleanup():
+        # First delay to let initial processes finish
+        time.sleep(delay)
+        
+        # Try up to 3 times with increasing delays
+        for attempt in range(3):
+            try:
+                if os.path.exists(file_path):
+                    # Force Python to release any handles it might have
+                    import gc
+                    gc.collect()
+                    
+                    os.remove(file_path)
+                    print(f"File {file_path} cleaned up successfully on attempt {attempt + 1}")
+                    break
+                else:
+                    print(f"File {file_path} already deleted")
+                    break
+            except Exception as e:
+                print(f"Cleanup attempt {attempt + 1} failed for {file_path}: {e}")
+                time.sleep(delay * (attempt + 1))  # Increase delay with each attempt
 
     threading.Thread(target=cleanup).start()
 
 @app.route('/download')
 def download_video():
     try:
-        video_path = 'final_video_with_subs.mp4'
+        session_id = session['user_id']
+        user_dir, _ = create_user_directory(session_id)
+        video_path = os.path.join(user_dir, f'final_video_with_subs_{session_id}.mp4')
+        
+        # Add debug logging
+        print(f"Looking for video at path: {video_path}")
+        print(f"Directory contents of {user_dir}:")
+        for file in os.listdir(user_dir):
+            print(f"- {file}")
+        
         if not os.path.exists(video_path):
+            print(f"Video file not found at: {video_path}")
             return "Video file not found", 404
-        
-        allowed_extensions = ('.mp4', '.jpg', '.jpeg', '.png')
-        
+
         @after_this_request
         def cleanup(response):
-            current_app.logger.info("Starting cleanup after download...")
+            def delayed_cleanup_wrapper():
+                time.sleep(5)  # Wait 5 seconds before cleanup
+                cleanup_user_files(user_dir, video_path)
             
-            # Schedule delayed cleanup for uploads directory and final video
-            uploads_dir = os.path.join(app.root_path, 'uploads')
-            for file in os.listdir(uploads_dir):
-                if file.startswith("uploaded_broll_") and file.lower().endswith(allowed_extensions):
-                    delayed_cleanup(os.path.join(uploads_dir, file))
-            
-            delayed_cleanup(video_path)  # Ensure final video is cleaned up
-            
+            # Start cleanup in a separate thread
+            threading.Thread(target=delayed_cleanup_wrapper).start()
             return response
 
-        return send_file(video_path, as_attachment=True)
+        # Include session_id in the downloaded filename
+        download_name = f'final_video_{session_id}.mp4'
+        return send_file(
+            video_path,
+            as_attachment=True,
+            download_name=download_name
+        )
     except Exception as e:
-        current_app.logger.error(f"Download error: {e}")
         return str(e), 404
 
 @app.route('/scraper', methods=['GET', 'POST'])
