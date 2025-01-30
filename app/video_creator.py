@@ -20,6 +20,7 @@ from skimage.transform import resize
 import json
 import subprocess
 import threading
+import uuid
 
 # Set the path to your Google Cloud credentials JSON file
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'dogwood-boulder-392113-d8917a17686f.json'
@@ -259,10 +260,26 @@ def create_clip_from_image(image_path, duration=5):
     return VideoClip(make_frame, duration=duration)
 
 def create_user_directory(session_id):
-    """Create a unique working directory for each user session"""
+    """Create a unique working directory for each user session with proper isolation"""
     user_dir = os.path.join('user_sessions', session_id)
     uploads_dir = os.path.join(user_dir, 'uploads')
+    
+    # Ensure directories exist and are empty
+    os.makedirs(user_dir, exist_ok=True)
     os.makedirs(uploads_dir, exist_ok=True)
+    
+    # Clean any existing temporary files in the directory
+    try:
+        for filename in os.listdir(user_dir):
+            if filename.startswith(('TEMP_', 'audio_file_', 'sub_file_')):
+                filepath = os.path.join(user_dir, filename)
+                try:
+                    os.remove(filepath)
+                except Exception as e:
+                    print(f"Warning: Could not remove temp file {filepath}: {str(e)}")
+    except Exception as e:
+        print(f"Warning: Error cleaning temporary files: {str(e)}")
+    
     return user_dir, uploads_dir
 
 def srt_time_to_ass_time(srt_time):
@@ -415,18 +432,20 @@ def create_styled_subtitles(video_input, ass_file, user_dir, session_id):
         return video_input
 
 def cleanup_user_files(user_dir, final_output):
-    """Clean up temporary files for a user session"""
+    """Clean up temporary files for a user session with better error handling"""
     try:
-        # Keep final output file, remove everything else
+        # Get session_id from the directory path
+        session_id = os.path.basename(user_dir)
+        
         for root, dirs, files in os.walk(user_dir, topdown=False):
             for name in files:
                 file_path = os.path.join(root, name)
-                # Don't delete the final video, order.json, or filename_mapping.json
-                if (file_path != final_output and 
-                    not file_path.endswith('order.json') and 
-                    not file_path.endswith('filename_mapping.json')):
+                # Only delete files that belong to this session and aren't the final output
+                if (session_id in name and 
+                    file_path != final_output and 
+                    not "final_video_" in name):
                     try:
-                        # Force Python to release any handles it might have
+                        # Force Python to release any handles
                         import gc
                         gc.collect()
                         
@@ -435,11 +454,11 @@ def cleanup_user_files(user_dir, final_output):
                     except Exception as e:
                         print(f"Warning: Could not delete {file_path}: {str(e)}")
             
-            # Try to remove empty directories except the user directory itself
+            # Try to remove empty directories
             for name in dirs:
                 try:
                     dir_path = os.path.join(root, name)
-                    if dir_path != user_dir:  # Don't remove the main user directory
+                    if os.path.exists(dir_path) and not os.listdir(dir_path):
                         os.rmdir(dir_path)
                         print(f"Removed empty directory: {dir_path}")
                 except Exception as e:
@@ -458,6 +477,11 @@ def delayed_cleanup(file_path, delay=5):
         for attempt in range(3):
             try:
                 if os.path.exists(file_path):
+                    # Don't delete if it's a final video
+                    if "final_video_" in os.path.basename(file_path):
+                        print(f"Skipping deletion of final video: {file_path}")
+                        break
+                        
                     # Force Python to release any handles it might have
                     import gc
                     gc.collect()
@@ -509,15 +533,19 @@ def cleanup_broll():
                         print(f"Warning: Could not delete uploaded b-roll {file}: {str(e)}")
 
 def create_romanian_video(romanian_script, session_id, progress_callback=None):
-    """Modified to use session-specific directories"""
+    """Modified to use session-specific directories and ensure file isolation"""
     user_dir, uploads_dir = create_user_directory(session_id)
     
-    # Update all file paths to use user directory and include session_id in final filenames
-    audio_path = os.path.join(user_dir, "audio_file.mp3")
-    srt_path = os.path.join(user_dir, "sub_file.srt")
-    output_path = os.path.join(user_dir, "final_clip_file.mp4")
-    final_output = os.path.join(user_dir, f"final_video_with_subs_{session_id}.mp4")
+    # Generate a unique video ID
+    video_id = str(uuid.uuid4())[:8]
     
+    # Update all file paths to include session_id to ensure uniqueness
+    audio_path = os.path.join(user_dir, f"audio_file_{session_id}.mp3")
+    srt_path = os.path.join(user_dir, f"sub_file_{session_id}.srt")
+    output_path = os.path.join(user_dir, f"final_clip_file_{session_id}.mp4")
+    temp_audio_path = os.path.join(user_dir, f"TEMP_MPY_wvf_snd_{session_id}.mp3")
+    final_output = os.path.join(user_dir, f"final_video_{session_id}_{video_id}.mp4")
+
     try:
         # Retrieve your ElevenLabs API key from an environment variable
         ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
@@ -687,8 +715,16 @@ def create_romanian_video(romanian_script, session_id, progress_callback=None):
         final_clip.write_videofile(
             output_path,
             fps=30,
-            logger='bar'
+            logger='bar',
+            temp_audiofile=temp_audio_path
         )
+
+        # Ensure temp audio file is cleaned up
+        if os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+            except Exception as e:
+                print(f"Warning: Could not remove temp audio file: {str(e)}")
 
         # Update subtitle creation to use user directory
         if os.path.exists(srt_path):
@@ -733,19 +769,16 @@ def create_romanian_video(romanian_script, session_id, progress_callback=None):
         raise e
 
     finally:
-        # Ensure all resources are closed in the finally block
+        # Clean up resources
         try:
             if 'final_clip' in locals() and final_clip:
                 final_clip.close()
-        except:
-            pass
-        try:
             if 'audio_clip' in locals() and audio_clip:
                 audio_clip.close()
-        except:
-            pass
+        except Exception as e:
+            print(f"Warning: Error during cleanup: {str(e)}")
         
-        # Force garbage collection to release file handles
+        # Force garbage collection
         import gc
         gc.collect()
 
