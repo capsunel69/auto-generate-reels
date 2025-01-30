@@ -124,10 +124,13 @@ def get_word_timestamps_from_google(audio_file_path):
     return words_with_times
 
 def create_grouped_srt(words_with_times, max_words=4):
-    """Create SRT content with grouped words"""
+    """Create SRT content with grouped words and improved timing"""
     srt_content = []
     current_index = 1
     current_group = []
+    
+    MIN_DURATION = 0.7  # Minimum duration for each subtitle in seconds
+    GAP_DURATION = 0.1  # Gap between subtitles in seconds
     
     for word_info in words_with_times:
         current_group.append(word_info)
@@ -139,11 +142,22 @@ def create_grouped_srt(words_with_times, max_words=4):
             start_time = current_group[0]['start_time']
             end_time = current_group[-1]['end_time']
             
-            # Add small gap between subtitles if needed
+            # Ensure minimum duration
+            if end_time - start_time < MIN_DURATION:
+                end_time = start_time + MIN_DURATION
+            
+            # Add gap between subtitles if needed
             if srt_content:
                 last_end_time = timestamp_to_seconds(srt_content[-1].split('\n')[1].split(' --> ')[1])
-                if start_time < last_end_time:
-                    start_time = last_end_time + 0.001
+                if start_time < last_end_time + GAP_DURATION:
+                    start_time = last_end_time + GAP_DURATION
+                    # Adjust end_time to maintain minimum duration
+                    end_time = max(end_time, start_time + MIN_DURATION)
+            
+            # Extend short subtitles for better readability
+            duration = end_time - start_time
+            if duration < MIN_DURATION:
+                end_time = start_time + MIN_DURATION
             
             srt_entry = f"{current_index}\n"
             srt_entry += f"{format_timestamp(start_time)} --> {format_timestamp(end_time)}\n"
@@ -157,6 +171,16 @@ def create_grouped_srt(words_with_times, max_words=4):
     if current_group:
         start_time = current_group[0]['start_time']
         end_time = current_group[-1]['end_time']
+        
+        # Apply same timing rules to final group
+        if end_time - start_time < MIN_DURATION:
+            end_time = start_time + MIN_DURATION
+            
+        if srt_content:
+            last_end_time = timestamp_to_seconds(srt_content[-1].split('\n')[1].split(' --> ')[1])
+            if start_time < last_end_time + GAP_DURATION:
+                start_time = last_end_time + GAP_DURATION
+                end_time = max(end_time, start_time + MIN_DURATION)
         
         srt_entry = f"{current_index}\n"
         srt_entry += f"{format_timestamp(start_time)} --> {format_timestamp(end_time)}\n"
