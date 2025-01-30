@@ -272,7 +272,7 @@ def create_romanian_video(romanian_script, progress_callback=None):
         if not ELEVENLABS_API_KEY:
             raise ValueError("ELEVENLABS_API_KEY is not set in environment variables.")
         
-        VOICE_ID = "gbLy9ep70G3JW53cTzFC"
+        VOICE_ID = "XRxOSfsrfY33DhTprCzb"
         SUBTITLE_GAP = 0
         
         # Initialize ElevenLabs client
@@ -280,12 +280,18 @@ def create_romanian_video(romanian_script, progress_callback=None):
 
         if progress_callback:
             yield from progress_callback("Generating audio file...|10")
-        # Generate audio using ElevenLabs
+        # Generate audio using ElevenLabs with voice parameters
         print("Generating audio file...")
         audio_stream = client.text_to_speech.convert_as_stream(
             text=romanian_script,
             voice_id=VOICE_ID,
-            model_id="eleven_multilingual_v2"
+            model_id="eleven_multilingual_v2",
+            voice_settings={
+                "stability": 0.68,        # Range: 0-1. Higher value = more stable, lower = more variable
+                "similarity_boost": 0.85, # Range: 0-1. Higher value = closer to original voice
+                "style": 0.05,            # Range: 0-1. Higher value = more stylized
+                "use_speaker_boost": True # Enhances clarity and target speaker similarity
+            }
         )
         
         # Save the streaming audio
@@ -549,16 +555,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         hours = int(total_milliseconds // 3600000)
         minutes = int((total_milliseconds % 3600000) // 60000)
         seconds = int((total_milliseconds % 60000) // 1000)
-        centiseconds = int((total_milliseconds % 1000) // 10)  # Convert to centiseconds for ASS
+        centiseconds = int((total_milliseconds % 1000) // 10)
         
         return f"{hours:01d}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
     
     for sub in subs:
         start_time = srt_time_to_ass_time(sub.start)
         end_time = srt_time_to_ass_time(sub.end)
-        text = sub.text.replace('\n', '\\N').upper()  # ASS line breaks and uppercase text
+        # Add explicit line wrapping with \N for every 30 characters approximately
+        text = sub.text.upper()
+        words = text.split()
+        lines = []
+        current_line = []
+        current_length = 0
         
-        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(150,150)\\move(540,1010,540,1000,0,100)\\t(0,130,\\alpha&H00&\\fscy110)\\t(300,600,\\fscy100)}}{text}\n"
+        for word in words:
+            if current_length + len(word) > 30:
+                lines.append(' '.join(current_line))
+                current_line = [word]
+                current_length = len(word)
+            else:
+                current_line.append(word)
+                current_length += len(word) + 1
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        text = '\\N'.join(lines)
+        
+        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(150,150)\\pos(540,1000)\\t(0,130,\\alpha&H00&\\fscy110)\\t(300,600,\\fscy100)}}{text}\n"
     
     # Save ASS file
     ass_file = "subtitles.ass"
