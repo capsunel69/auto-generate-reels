@@ -633,7 +633,8 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         if not ELEVENLABS_API_KEY:
             raise ValueError("ELEVENLABS_API_KEY is not set in environment variables.")
         
-        VOICE_ID = "XRxOSfsrfY33DhTprCzb"
+        # VOICE_ID = "XRxOSfsrfY33DhTprCzb"
+        VOICE_ID = "gbLy9ep70G3JW53cTzFC"
         SUBTITLE_GAP = 0
         
         # Initialize ElevenLabs client
