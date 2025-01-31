@@ -343,7 +343,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,0,2,150,150,30,1
+Style: Default,{font_name},72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,0,2,400,400,30,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -360,8 +360,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             current_line = []
             current_length = 0
             
+            # Reduced maximum characters per line from 30 to 20
             for word in words:
-                if current_length + len(word) > 30:
+                if current_length + len(word) > 20:
                     lines.append(' '.join(current_line))
                     current_line = [word]
                     current_length = len(word)
