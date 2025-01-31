@@ -699,9 +699,14 @@ def create_romanian_video(romanian_script, session_id, progress_callback=None):
             
             processed_clips.append(clip)
 
-        # Calculate how many times we need to loop through clips
+        # Add a small buffer at the end of the video
         CLIP_DURATION = 5  # Duration for each clip in seconds
-        total_clips_needed = math.ceil(total_duration / CLIP_DURATION)
+        BUFFER_DURATION = 1  # seconds of buffer at the end
+        
+        # Calculate how many times we need to loop through clips
+        # Add buffer to total duration
+        total_duration_with_buffer = total_duration + BUFFER_DURATION
+        total_clips_needed = math.ceil(total_duration_with_buffer / CLIP_DURATION)
         
         # Create final sequence of clips
         final_clips = []
@@ -711,7 +716,7 @@ def create_romanian_video(romanian_script, session_id, progress_callback=None):
             
             # Calculate start and end times for this segment
             start_time = i * CLIP_DURATION
-            end_time = min((i + 1) * CLIP_DURATION, total_duration)
+            end_time = min((i + 1) * CLIP_DURATION, total_duration_with_buffer)
             segment_duration = end_time - start_time
             
             # If clip is shorter than needed duration, loop it
