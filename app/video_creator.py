@@ -1,7 +1,8 @@
 import openai
 import requests
 import os
-from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip, ImageClip, VideoClip
+from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip, ImageClip, VideoClip, CompositeAudioClip, concatenate_audioclips
+from moviepy.audio.fx import MultiplyVolume
 import math
 import pysrt
 import time
@@ -786,8 +787,28 @@ def create_romanian_video(romanian_script, session_id, progress_callback=None):
         # Concatenate all clips
         final_clip = concatenate_videoclips(final_clips)
         
-        # Add audio
-        final_clip = final_clip.with_audio(audio_clip)
+        # Load the voice audio
+        voice_audio = AudioFileClip(audio_path)
+        
+        # Load and prepare background music
+        bg_music = AudioFileClip("music/funny 2.mp3")
+        
+        # Loop the background music if it's shorter than the voice audio
+        if bg_music.duration < voice_audio.duration:
+            num_loops = math.ceil(voice_audio.duration / bg_music.duration)
+            bg_music = concatenate_audioclips([bg_music] * num_loops)
+        
+        # Trim background music to match voice duration (plus small buffer)
+        bg_music = bg_music.with_duration(voice_audio.duration + BUFFER_DURATION)
+        
+        # Lower the volume of background music using MultiplyVolume
+        bg_music = bg_music.with_effects([MultiplyVolume(0.15)])  # 15% of original volume
+        
+        # Combine voice and background music
+        final_audio = CompositeAudioClip([voice_audio, bg_music])
+
+        # Use combined audio instead of just voice audio
+        final_clip = final_clip.with_audio(final_audio)
 
         # Create SSELogger instance with a proper callback
         def sse_callback(msg):
@@ -841,8 +862,12 @@ def create_romanian_video(romanian_script, session_id, progress_callback=None):
         # Clean up the clip resources before returning
         if final_clip:
             final_clip.close()
-        if audio_clip:
-            audio_clip.close()
+        if voice_audio:
+            voice_audio.close()
+        if bg_music:
+            bg_music.close()
+        if final_audio:
+            final_audio.close()
 
         # Optional small delay for Windows to release file handles
         time.sleep(1)
@@ -854,12 +879,16 @@ def create_romanian_video(romanian_script, session_id, progress_callback=None):
         raise e
 
     finally:
-        # Clean up resources
+        # Update cleanup to include new audio clips
         try:
             if 'final_clip' in locals() and final_clip:
                 final_clip.close()
-            if 'audio_clip' in locals() and audio_clip:
-                audio_clip.close()
+            if 'voice_audio' in locals() and voice_audio:
+                voice_audio.close()
+            if 'bg_music' in locals() and bg_music:
+                bg_music.close()
+            if 'final_audio' in locals() and final_audio:
+                final_audio.close()
         except Exception as e:
             print(f"Warning: Error during cleanup: {str(e)}")
         
