@@ -613,8 +613,8 @@ def cleanup_broll():
                     if attempt == 2:  # Only print error on last attempt
                         print(f"Warning: Could not delete uploaded b-roll {file}: {str(e)}")
 
-def create_romanian_video(romanian_script, session_id, progress_callback=None):
-    """Modified to use session-specific directories and ensure file isolation"""
+def create_romanian_video(romanian_script, session_id, selected_music="funny 2.mp3", progress_callback=None):
+    """Modified to accept selected_music parameter"""
     user_dir, uploads_dir = create_user_directory(session_id)
     
     # Generate a unique video ID
@@ -790,8 +790,8 @@ def create_romanian_video(romanian_script, session_id, progress_callback=None):
         # Load the voice audio
         voice_audio = AudioFileClip(audio_path)
         
-        # Load and prepare background music
-        bg_music = AudioFileClip("music/funny 2.mp3")
+        # Load and prepare background music using selected music
+        bg_music = AudioFileClip(f"music/{selected_music}")
         
         # Loop the background music if it's shorter than the voice audio
         if bg_music.duration < voice_audio.duration:

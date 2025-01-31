@@ -8,11 +8,12 @@ import json
 import uuid
 from flask_session import Session
 from datetime import timedelta
+from pathlib import Path
 
 # Load environment variables from .env file
 load_dotenv()
 
-from flask import Flask, request, render_template_string, jsonify, send_file, Response
+from flask import Flask, request, render_template_string, jsonify, send_file, Response, send_from_directory
 from video_creator import create_romanian_video, cleanup_broll, create_user_directory
 
 app = Flask(__name__)
@@ -40,6 +41,7 @@ def before_request():
 @app.route('/progress')
 def progress_stream():
     romanian_script = request.args.get('script', '')
+    selected_music = request.args.get('music', 'funny 2.mp3')  # Default to existing music if none selected
     session_id = session['user_id']
 
     def generate():
@@ -48,7 +50,7 @@ def progress_stream():
 
         try:
             yield "data: Starting video creation...\n\n"
-            for message in create_romanian_video(romanian_script, session_id, progress_callback):
+            for message in create_romanian_video(romanian_script, session_id, selected_music, progress_callback):
                 yield message
             yield "data: DONE\n\n"
         except Exception as e:
@@ -58,6 +60,10 @@ def progress_stream():
 
 @app.route('/video-creator', methods=['GET'])
 def create_video():
+    # Get list of music files
+    music_dir = Path('music')
+    music_files = [f.name for f in music_dir.glob('*.mp3')]
+    
     return render_template_string('''
         <!doctype html>
         <html lang="en">
@@ -343,6 +349,47 @@ def create_video():
                     0% { transform: translateY(-50%) rotate(0deg); }
                     100% { transform: translateY(-50%) rotate(360deg); }
                 }
+
+                /* Add these new styles */
+                .music-selector {
+                    margin-bottom: 1.5rem;
+                }
+
+                .music-selector label {
+                    display: block;
+                    font-weight: 500;
+                    margin-bottom: 0.5rem;
+                    color: var(--text-secondary);
+                }
+
+                .music-selector select {
+                    width: 100%;
+                    padding: 0.75rem;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.5rem;
+                    font-size: 1rem;
+                    margin-bottom: 0.5rem;
+                    background-color: white;
+                }
+
+                .music-preview {
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                    padding: 0.75rem;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.5rem;
+                    background-color: var(--background);
+                }
+
+                .music-preview audio {
+                    flex-grow: 1;
+                }
+
+                .music-preview-label {
+                    font-size: 0.875rem;
+                    color: var(--text-secondary);
+                }
             </style>
         </head>
         <body>
@@ -362,6 +409,24 @@ def create_video():
                         <h3>Uploaded Files (drag to reorder)</h3>
                         <ul class="file-list" id="fileList"></ul>
                     </div>
+                    
+                    <!-- Add music selector -->
+                    <div class="music-selector">
+                        <label>Select Background Music</label>
+                        <select name="background_music" id="musicSelect">
+                            {% for music in music_files %}
+                            <option value="{{ music }}">{{ music }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="music-preview">
+                            <span class="music-preview-label">Preview:</span>
+                            <audio id="musicPreview" controls>
+                                <source src="/music/{{ music_files[0] }}" type="audio/mpeg">
+                                Your browser does not support the audio element.
+                            </audio>
+                        </div>
+                    </div>
+                    
                     <textarea name="script" id="scriptInput" rows="10" cols="30" placeholder="Enter Romanian script here..." required></textarea><br>
                     <input type="submit" value="Create Video" id="submitBtn">
                 </form>
@@ -425,11 +490,19 @@ def create_video():
                     });
                 });
 
+                // Add music preview functionality
+                document.getElementById('musicSelect').addEventListener('change', function() {
+                    const audioPreview = document.getElementById('musicPreview');
+                    audioPreview.src = `/music/${this.value}`;
+                    audioPreview.load();
+                });
+
                 document.getElementById('videoForm').onsubmit = async function(event) {
                     event.preventDefault();
                     const form = event.target;
                     const fileList = document.getElementById('fileList');
                     const formData = new FormData(form);
+                    const selectedMusic = document.getElementById('musicSelect').value;
 
                     // Get the actual order of files after drag and drop
                     const fileOrder = Array.from(fileList.children).map(li => li.dataset.filename);
@@ -480,9 +553,9 @@ def create_video():
                             throw new Error(reorderData.error || 'Reorder failed');
                         }
 
-                        // Finally start video creation
+                        // Finally start video creation with selected music
                         const script = form.querySelector('textarea[name="script"]').value;
-                        const eventSource = new EventSource(`/progress?script=${encodeURIComponent(script)}`);
+                        const eventSource = new EventSource(`/progress?script=${encodeURIComponent(script)}&music=${encodeURIComponent(selectedMusic)}`);
                         
                         eventSource.onmessage = function(event) {
                             if (event.data === 'DONE') {
@@ -545,7 +618,7 @@ def create_video():
             </script>
         </body>
         </html>
-    ''')
+    ''', music_files=music_files)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -1167,5 +1240,46 @@ def home():
         </html>
     ''')
 
+# Add route to serve music files
+@app.route('/music/<filename>')
+def serve_music(filename):
+    return send_file(f'music/{filename}', mimetype='audio/mpeg')
+
+# Add these new routes for favicons
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory('favicon', 'favicon.ico')
+
+@app.route('/apple-touch-icon.png')
+def apple_touch_icon():
+    return send_from_directory('favicon', 'apple-touch-icon.png')
+
+@app.route('/favicon-32x32.png')
+def favicon_32():
+    return send_from_directory('favicon', 'favicon-32x32.png')
+
+@app.route('/favicon-16x16.png')
+def favicon_16():
+    return send_from_directory('favicon', 'favicon-16x16.png')
+
+@app.route('/site.webmanifest')
+def site_manifest():
+    return send_from_directory('favicon', 'site.webmanifest')
+
+# Also update the HTML templates to include the favicon links in the head section
+def get_favicon_html():
+    return '''
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+    '''
+
 if __name__ == '__main__':
+    # When running locally, you can access via:
+    # localhost:5000 or 127.0.0.1:5000
+    # You can also access via your local network IP (e.g. 192.168.1.100:5000)
+    # For a custom domain, you'll need to:
+    # 1. Configure DNS settings to point your domain to your server's IP
+    # 2. Set up a reverse proxy (like Nginx) to forward requests to this Flask app
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
