@@ -90,36 +90,73 @@ def get_word_timestamps_from_google(audio_file_path):
     """Get word-level timestamps using Google Cloud Speech-to-Text"""
     client = speech_v1.SpeechClient()
 
-    # Convert MP3 to WAV (Google Speech requires WAV format)
+    # Convert MP3 to WAV
     audio = AudioSegment.from_mp3(audio_file_path)
-    wav_data = io.BytesIO()
-    audio.export(wav_data, format="wav")
-    wav_data.seek(0)
-
-    # Read the audio file
-    content = wav_data.read()
-
-    audio = speech_v1.RecognitionAudio(content=content)
-    config = speech_v1.RecognitionConfig(
-        encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
-        language_code="ro-RO",  # Romanian language code
-        enable_word_time_offsets=True,
-    )
-
-    response = client.recognize(config=config, audio=audio)
     
+    # Split audio into 30-second chunks if longer than 1 minute
+    chunk_length = 30 * 1000  # 30 seconds in milliseconds
     words_with_times = []
-    for result in response.results:
-        for word in result.alternatives[0].words:
-            # Convert the protobuf Duration objects to seconds
-            start_time = word.start_time.total_seconds()
-            end_time = word.end_time.total_seconds()
+    
+    if len(audio) > 60 * 1000:  # If audio is longer than 1 minute
+        chunks = math.ceil(len(audio) / chunk_length)
+        for i in range(chunks):
+            start_time = i * chunk_length
+            end_time = min((i + 1) * chunk_length, len(audio))
             
-            words_with_times.append({
-                'word': word.word,
-                'start_time': start_time,
-                'end_time': end_time
-            })
+            # Extract chunk
+            chunk = audio[start_time:end_time]
+            
+            # Export chunk to WAV
+            wav_data = io.BytesIO()
+            chunk.export(wav_data, format="wav")
+            wav_data.seek(0)
+            content = wav_data.read()
+
+            # Process chunk
+            audio_input = speech_v1.RecognitionAudio(content=content)
+            config = speech_v1.RecognitionConfig(
+                encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
+                language_code="ro-RO",
+                enable_word_time_offsets=True,
+            )
+
+            response = client.recognize(config=config, audio=audio_input)
+            
+            # Process results and adjust timestamps
+            time_offset = start_time / 1000.0  # Convert to seconds
+            for result in response.results:
+                for word in result.alternatives[0].words:
+                    start_time = word.start_time.total_seconds() + time_offset
+                    end_time = word.end_time.total_seconds() + time_offset
+                    
+                    words_with_times.append({
+                        'word': word.word,
+                        'start_time': start_time,
+                        'end_time': end_time
+                    })
+    else:
+        # For short audio, process as before
+        wav_data = io.BytesIO()
+        audio.export(wav_data, format="wav")
+        wav_data.seek(0)
+        content = wav_data.read()
+
+        audio_input = speech_v1.RecognitionAudio(content=content)
+        config = speech_v1.RecognitionConfig(
+            encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
+            language_code="ro-RO",
+            enable_word_time_offsets=True,
+        )
+
+        response = client.recognize(config=config, audio=audio_input)
+        
+        for result in response.results:
+            for word in result.alternatives[0].words:
+                words_with_times.append({
+                    'word': word.word,
+                    'start_time': word.start_time.total_seconds(),
+                    'end_time': word.end_time.total_seconds()
+                })
     
     return words_with_times
 
