@@ -202,23 +202,41 @@ def align_texts(original_script, recognized_words):
     rec_idx = 0
     orig_idx = 0
     
-    while rec_idx < len(recognized_words) and orig_idx < len(original_words):
+    while orig_idx < len(original_words):
+        # If we've run out of recognized words but still have original words
+        if rec_idx >= len(recognized_words):
+            # Use the last recognized word's timing as a base
+            if len(recognized_words) > 0:
+                last_word = recognized_words[-1]
+                word_duration = last_word['end_time'] - last_word['start_time']
+                new_start = last_word['end_time'] + 0.1  # Add small gap
+                
+                # Add remaining words with estimated timing
+                while orig_idx < len(original_words):
+                    aligned_words.append({
+                        'word': original_words[orig_idx],
+                        'start_time': new_start,
+                        'end_time': new_start + word_duration
+                    })
+                    new_start += word_duration + 0.1  # Add small gap between words
+                    orig_idx += 1
+            break
+            
         rec_word = recognized_words[rec_idx]['word'].lower().strip('.,!?')
         orig_word = original_words[orig_idx].lower().strip('.,!?')
         
         # If words match exactly or are very similar
         if rec_word == orig_word or SequenceMatcher(None, rec_word, orig_word).ratio() > 0.8:
             aligned_words.append({
-                'word': original_words[orig_idx],  # Use original word
+                'word': original_words[orig_idx],
                 'start_time': recognized_words[rec_idx]['start_time'],
                 'end_time': recognized_words[rec_idx]['end_time']
             })
             rec_idx += 1
             orig_idx += 1
         else:
-            # If recognized word is likely wrong, use original word with estimated timing
-            if rec_idx < len(recognized_words) - 1:
-                # Estimate timing based on surrounding recognized words
+            # If words don't match, estimate timing based on surrounding words
+            if rec_idx < len(recognized_words):
                 start_time = recognized_words[rec_idx]['start_time']
                 end_time = recognized_words[rec_idx]['end_time']
                 word_duration = end_time - start_time
@@ -702,7 +720,7 @@ def create_romanian_video(romanian_script, session_id, progress_callback=None):
 
         # Add a small buffer at the end of the video
         CLIP_DURATION = 5  # Duration for each clip in seconds
-        BUFFER_DURATION = 1  # seconds of buffer at the end
+        BUFFER_DURATION = 0.5  # seconds of buffer at the end
         
         # Calculate how many times we need to loop through clips
         # Add buffer to total duration

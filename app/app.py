@@ -316,6 +316,33 @@ def create_video():
                     background-color: var(--primary-color);
                     color: white;
                 }
+
+                /* Add these new styles */
+                .loading {
+                    position: relative;
+                    cursor: wait;
+                    opacity: 0.7;
+                    padding-right: 40px;
+                }
+
+                .loading::after {
+                    content: "";
+                    position: absolute;
+                    width: 20px;
+                    height: 20px;
+                    top: 50%;
+                    right: 15px;
+                    transform: translateY(-50%);
+                    border: 2px solid var(--primary-color);
+                    border-radius: 50%;
+                    border-top: 2px solid transparent;
+                    animation: spin 1s linear infinite;
+                }
+
+                @keyframes spin {
+                    0% { transform: translateY(-50%) rotate(0deg); }
+                    100% { transform: translateY(-50%) rotate(360deg); }
+                }
             </style>
         </head>
         <body>
@@ -336,7 +363,7 @@ def create_video():
                         <ul class="file-list" id="fileList"></ul>
                     </div>
                     <textarea name="script" id="scriptInput" rows="10" cols="30" placeholder="Enter Romanian script here..." required></textarea><br>
-                    <input type="submit" value="Create Video">
+                    <input type="submit" value="Create Video" id="submitBtn">
                 </form>
                 <div class="progress-bar">
                     <div class="progress-bar-fill"></div>
@@ -412,12 +439,18 @@ def create_video():
                     const progressBar = document.querySelector('.progress-bar');
                     const progressBarFill = document.querySelector('.progress-bar-fill');
                     const downloadBtn = document.getElementById('downloadBtn');
+                    const submitBtn = document.getElementById('submitBtn');
 
                     progressDiv.style.display = 'block';
                     progressBar.style.display = 'block';
                     progressDiv.innerHTML = '';
                     progressBarFill.style.width = '0%';
                     downloadBtn.style.display = 'none';
+
+                    // Add loading state
+                    submitBtn.classList.add('loading');
+                    submitBtn.value = 'Creating Video...';
+                    submitBtn.disabled = true;
 
                     try {
                         // First upload the files
@@ -457,9 +490,19 @@ def create_video():
                                 downloadBtn.style.display = 'inline-block';
                                 progressDiv.innerHTML += '<br><span class="success-message">Video created successfully!</span>';
                                 progressBarFill.style.width = '100%';
+                                
+                                // Reset button
+                                submitBtn.classList.remove('loading');
+                                submitBtn.value = 'Create Video';
+                                submitBtn.disabled = false;
                             } else if (event.data.startsWith('ERROR:')) {
                                 eventSource.close();
                                 progressDiv.innerHTML += '<br><span class="error-message">' + event.data.substring(7) + '</span>';
+                                
+                                // Reset button
+                                submitBtn.classList.remove('loading');
+                                submitBtn.value = 'Create Video';
+                                submitBtn.disabled = false;
                             } else {
                                 const [message, percentage] = event.data.split('|');
                                 if (percentage) {
@@ -473,9 +516,19 @@ def create_video():
                         eventSource.onerror = function() {
                             eventSource.close();
                             progressDiv.innerHTML += '<br><span class="error-message">Connection lost</span>';
+                            
+                            // Reset button
+                            submitBtn.classList.remove('loading');
+                            submitBtn.value = 'Create Video';
+                            submitBtn.disabled = false;
                         };
                     } catch (error) {
                         progressDiv.innerHTML += '<br><span class="error-message">Error: ' + error.message + '</span>';
+                        
+                        // Reset button
+                        submitBtn.classList.remove('loading');
+                        submitBtn.value = 'Create Video';
+                        submitBtn.disabled = false;
                     }
                 };
 
