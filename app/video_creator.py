@@ -373,8 +373,15 @@ def srt_time_to_ass_time(srt_time):
     return f"{hours}:{minutes:02d}:{seconds:02d}.{milliseconds//10:02d}"
 
 def create_subtitle_clips(srt_file, videosize, user_dir):
-    """Convert SRT to ASS and create styled subtitles"""
+    """
+    Convert SRT to ASS with a subtle quick pop animation (slightly smaller zoom),
+    and a small motion blur. No karaoke effects or random emojis.
+    """
     try:
+        import pysrt
+        import random
+        import os
+        
         # Get the absolute path to the font file and ensure proper path formatting
         font_path = os.path.abspath(os.path.join('src', 'fonts', 'Montserrat-Black.ttf'))
         font_path = font_path.replace('\\', '/')
@@ -398,25 +405,37 @@ PlayResY: 1920
 WrapStyle: 2
 
 [V4+ Styles]
+; Only a single 'Default' style is declared, no Karaoke or emojis
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,0,2,400,400,30,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-        
+
         subs = pysrt.open(srt_file)
-        
+
+        # Helper to convert SRT time to an ASS time
+        def srt_time_to_ass_time(srt_time):
+            hours = srt_time.hours
+            minutes = srt_time.minutes
+            seconds = srt_time.seconds
+            milliseconds = srt_time.milliseconds
+            return f"{hours}:{minutes:02d}:{seconds:02d}.{milliseconds//10:02d}"
+
         for sub in subs:
             start_time = srt_time_to_ass_time(sub.start)
             end_time = srt_time_to_ass_time(sub.end)
+
+            # Convert the text to uppercase
             text = sub.text.upper()
+
+            # Simple line-wrapping logic
             words = text.split()
             lines = []
             current_line = []
             current_length = 0
-            
-            # Reduced maximum characters per line from 30 to 20
+            # Reduced maximum characters per line from 30 to ~20
             for word in words:
                 if current_length + len(word) > 20:
                     lines.append(' '.join(current_line))
@@ -425,13 +444,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 else:
                     current_line.append(word)
                     current_length += len(word) + 1
-            
             if current_line:
                 lines.append(' '.join(current_line))
-            
-            text = '\\N'.join(lines)
-            
-            ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{{\\fad(150,150)\\pos(540,1000)\\t(0,130,\\alpha&H00&\\fscy110)\\t(300,600,\\fscy100)}}{text}\n"
+            wrapped_text = '\\N'.join(lines)
+
+            # We add a smaller pop-in animation with slight motion blur:
+            # \blur0.5 adds a mild blur; \t on scale from 120% to 100%
+            dialogue_line = (
+                f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,"
+                f"{{\\pos(540,1000)"
+                f"\\fad(100,100)"               # Fade in/out
+                f"\\blur0.5"
+                f"\\t(0,150,\\fscx120\\fscy120)" # Quick pop up to 120%
+                f"\\t(150,300,\\fscx100\\fscy100)}}"
+                f"{wrapped_text}\n"
+            )
+
+            ass_content += dialogue_line
         
         # Save ASS file to user directory
         with open(ass_file, "w", encoding="utf-8") as f:
