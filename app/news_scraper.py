@@ -76,7 +76,7 @@ def generate_tiktok_script(article_data, custom_prompt=None):
                 {"role": "system", "content": "You are a skilled Romanian news script writer for social media, specialized in creating viral hooks."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=5000,
+            max_tokens=10000,
             # Controls randomness in the output (0.0 = deterministic, 1.0 = most random)
             temperature=0.7  # Balanced between creativity and consistency
         )
