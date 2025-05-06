@@ -374,8 +374,11 @@ def srt_time_to_ass_time(srt_time):
 
 def create_subtitle_clips(srt_file, videosize, user_dir):
     """
-    Convert SRT to ASS with a subtle quick pop animation (slightly smaller zoom),
-    and a small motion blur. No karaoke effects or random emojis.
+    Convert SRT to ASS with TikTok-style subtitles:
+    - Fixed groups of 2-3 words
+    - Words in a group are highlighted sequentially as they're spoken
+    - Then move to the next group
+    - Fade effects only between groups, not for each word
     """
     try:
         import pysrt
@@ -405,62 +408,148 @@ PlayResY: 1920
 WrapStyle: 2
 
 [V4+ Styles]
-; Only a single 'Default' style is declared, no Karaoke or emojis
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,0,2,400,400,30,1
+; Default style - for words not currently being spoken
+Style: Default,{font_name},64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,4,0,2,400,400,30,1
+; Highlighted style - for words currently being spoken
+Style: Highlight,{font_name},64,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,4,0,2,400,400,30,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-        subs = pysrt.open(srt_file)
+        # Try to extract individual word information from the JSON timing file
+        words_with_times = []
+        try:
+            # Check if we have our original words_with_times data
+            words_file = os.path.join(os.path.dirname(srt_file), f"words_timing_{os.path.basename(srt_file).split('_')[2].split('.')[0]}.json")
+            if os.path.exists(words_file):
+                with open(words_file, 'r', encoding='utf-8') as f:
+                    words_with_times = json.load(f)
+                print(f"Loaded {len(words_with_times)} words with timing data")
+            else:
+                print(f"Word timing file not found: {words_file}")
+        except Exception as e:
+            print(f"Could not extract word-level timing: {e}")
+            
+        if words_with_times:
+            # Group size - how many words in each fixed group
+            group_size = 3  # Show 3 words at a time
+            
+            # Create fixed groups of words
+            word_groups = []
+            for i in range(0, len(words_with_times), group_size):
+                group = []
+                for j in range(group_size):
+                    if i + j < len(words_with_times):
+                        group.append(words_with_times[i + j])
+                if group:
+                    word_groups.append(group)
+            
+            # Process each word within each fixed group
+            for group_idx, group in enumerate(word_groups):
+                # For each word in the group, create a subtitle event
+                for i, current_word in enumerate(group):
+                    start_time = current_word['start_time']
+                    end_time = current_word['end_time']
+                    
+                    # Convert times to ASS format
+                    start_ass = format_timestamp_to_ass(start_time)
+                    end_ass = format_timestamp_to_ass(end_time)
+                    
+                    # Build the text with highlighting tags
+                    text_parts = []
+                    for j, word_info in enumerate(group):
+                        word = word_info['word'].upper()  # Convert to uppercase
+                        
+                        # Only highlight the current word being spoken
+                        if j == i:
+                            text_parts.append(f"{{\\c&H00FFFF&\\bord4}}{word}{{\\c&HFFFFFF&\\bord3}}")
+                        else:
+                            text_parts.append(word)
+                    
+                    text = " ".join(text_parts)
+                    
+                    # Calculate position (centered horizontally, with vertical offset)
+                    x_pos = 540  # Center of 1080 width
+                    y_pos = 1000  # Vertical position
+                    
+                    # Only add fade effects for the first and last word in each group
+                    # This creates fade between groups but not for each word
+                    animation = ""
+                    if i == 0:  # First word in the group
+                        # Only add fade-in if this is the first group or a new group
+                        if group_idx > 0:
+                            animation = "\\fad(80,0)"  # Fade in only
+                    elif i == len(group) - 1:  # Last word in the group
+                        # Only add fade-out if this is the last group or we're moving to a new group
+                        if group_idx < len(word_groups) - 1:
+                            animation = "\\fad(0,80)"  # Fade out only
+                    
+                    # Add subtle animations for the entire group
+                    dialogue_line = (
+                        f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,"
+                        f"{{\\pos({x_pos},{y_pos})"
+                        f"{animation}"
+                        f"\\blur0.5"
+                        f"\\bord3"
+                        f"\\shad2"
+                        f"}}{text}\n"
+                    )
+                    
+                    ass_content += dialogue_line
+        else:
+            # Fallback to traditional subtitle display if word timing isn't available
+            subs = pysrt.open(srt_file)
+            
+            # Helper to convert SRT time to an ASS time
+            def srt_time_to_ass_time(srt_time):
+                hours = srt_time.hours
+                minutes = srt_time.minutes
+                seconds = srt_time.seconds
+                milliseconds = srt_time.milliseconds
+                return f"{hours}:{minutes:02d}:{seconds:02d}.{milliseconds//10:02d}"
+            
+            for sub in subs:
+                start_time = srt_time_to_ass_time(sub.start)
+                end_time = srt_time_to_ass_time(sub.end)
 
-        # Helper to convert SRT time to an ASS time
-        def srt_time_to_ass_time(srt_time):
-            hours = srt_time.hours
-            minutes = srt_time.minutes
-            seconds = srt_time.seconds
-            milliseconds = srt_time.milliseconds
-            return f"{hours}:{minutes:02d}:{seconds:02d}.{milliseconds//10:02d}"
+                # Convert the text to uppercase
+                text = sub.text.upper()
 
-        for sub in subs:
-            start_time = srt_time_to_ass_time(sub.start)
-            end_time = srt_time_to_ass_time(sub.end)
-
-            # Convert the text to uppercase
-            text = sub.text.upper()
-
-            # Simple line-wrapping logic
-            words = text.split()
-            lines = []
-            current_line = []
-            current_length = 0
-            # Reduced maximum characters per line from 30 to ~20
-            for word in words:
-                if current_length + len(word) > 20:
+                # Simple line-wrapping logic
+                words = text.split()
+                lines = []
+                current_line = []
+                current_length = 0
+                
+                # Reduced maximum characters per line from 30 to ~20
+                for word in words:
+                    if current_length + len(word) > 20:
+                        lines.append(' '.join(current_line))
+                        current_line = [word]
+                        current_length = len(word)
+                    else:
+                        current_line.append(word)
+                        current_length += len(word) + 1
+                if current_line:
                     lines.append(' '.join(current_line))
-                    current_line = [word]
-                    current_length = len(word)
-                else:
-                    current_line.append(word)
-                    current_length += len(word) + 1
-            if current_line:
-                lines.append(' '.join(current_line))
-            wrapped_text = '\\N'.join(lines)
+                wrapped_text = '\\N'.join(lines)
 
-            # We add a smaller pop-in animation with slight motion blur:
-            # \blur0.5 adds a mild blur; \t on scale from 120% to 100%
-            dialogue_line = (
-                f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,"
-                f"{{\\pos(540,1000)"
-                f"\\fad(100,100)"               # Fade in/out
-                f"\\blur0.5"
-                f"\\t(0,150,\\fscx120\\fscy120)" # Quick pop up to 120%
-                f"\\t(150,300,\\fscx100\\fscy100)}}"
-                f"{wrapped_text}\n"
-            )
+                # Enhanced animation with a bolder visual style:
+                dialogue_line = (
+                    f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,"
+                    f"{{\\pos(540,1000)"
+                    f"\\fad(100,100)"               # Fade in/out
+                    f"\\blur0.5"                    # Mild blur
+                    f"\\bord3"                      # Thicker border
+                    f"\\shad2"                      # Stronger shadow
+                    f"\\t(0,150,\\fscx110\\fscy110)" # Quick pop up to 110%
+                    f"\\t(150,300,\\fscx100\\fscy100)}}"
+                    f"{wrapped_text}\n"
+                )
 
-            ass_content += dialogue_line
+                ass_content += dialogue_line
         
         # Save ASS file to user directory
         with open(ass_file, "w", encoding="utf-8") as f:
@@ -472,6 +561,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     except Exception as e:
         print(f"Error in create_subtitle_clips: {str(e)}")
         return None
+
+def format_timestamp_to_ass(seconds):
+    """Convert seconds to ASS timestamp format (H:MM:SS.cc)"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    centisecs = int((seconds % 1) * 100)
+    return f"{hours}:{minutes:02d}:{secs:02d}.{centisecs:02d}"
 
 def create_styled_subtitles(video_input, ass_file, user_dir, session_id):
     """Apply ASS subtitles using FFmpeg"""
@@ -715,6 +812,11 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         # Save the processed SRT file
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write(srt_content)
+            
+        # Save word timing data for word-by-word highlighting
+        words_timing_path = os.path.join(user_dir, f"words_timing_{session_id}.json")
+        with open(words_timing_path, "w", encoding="utf-8") as f:
+            json.dump(aligned_words, f, indent=2)
 
         if progress_callback:
             yield from progress_callback("Creating video...|50")
