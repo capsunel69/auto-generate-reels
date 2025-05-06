@@ -739,8 +739,8 @@ def cleanup_broll():
                     if attempt == 2:  # Only print error on last attempt
                         print(f"Warning: Could not delete uploaded b-roll {file}: {str(e)}")
 
-def create_romanian_video(romanian_script, session_id, selected_music="funny 2.mp3", progress_callback=None):
-    """Modified to accept selected_music parameter"""
+def create_romanian_video(romanian_script, session_id, selected_music="funny 2.mp3", voice_id="gbLy9ep70G3JW53cTzFC", progress_callback=None):
+    """Modified to accept selected_music and voice_id parameters"""
     user_dir, uploads_dir = create_user_directory(session_id)
     
     # Generate a unique video ID
@@ -759,8 +759,8 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         if not ELEVENLABS_API_KEY:
             raise ValueError("ELEVENLABS_API_KEY is not set in environment variables.")
         
-        # VOICE_ID = "XRxOSfsrfY33DhTprCzb"
-        VOICE_ID = "gbLy9ep70G3JW53cTzFC"
+        # Use the voice_id parameter instead of hardcoded value
+        VOICE_ID = voice_id
         SUBTITLE_GAP = 0
         
         # Initialize ElevenLabs client

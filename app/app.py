@@ -42,6 +42,7 @@ def before_request():
 def progress_stream():
     romanian_script = request.args.get('script', '')
     selected_music = request.args.get('music', 'funny 2.mp3')  # Default to existing music if none selected
+    selected_voice = request.args.get('voice', 'gbLy9ep70G3JW53cTzFC')  # Default to Madalina if none selected
     session_id = session['user_id']
 
     def generate():
@@ -50,7 +51,7 @@ def progress_stream():
 
         try:
             yield "data: Starting video creation...\n\n"
-            for message in create_romanian_video(romanian_script, session_id, selected_music, progress_callback):
+            for message in create_romanian_video(romanian_script, session_id, selected_music, selected_voice, progress_callback):
                 yield message
             yield "data: DONE\n\n"
         except Exception as e:
@@ -63,6 +64,13 @@ def create_video():
     # Get list of music files
     music_dir = Path('music')
     music_files = [f.name for f in music_dir.glob('*.mp3')]
+    
+    # Define available voices
+    voices = [
+        {"id": "gbLy9ep70G3JW53cTzFC", "name": "Madalina", "preview": "madalina.mp3"},
+        {"id": "8QdBGRwn9G5tpGGTOaOe", "name": "Panfiliu", "preview": "panfiliu.mp3"},
+        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Karen", "preview": "karen.mp3"}
+    ]
     
     return render_template_string('''
         <!doctype html>
@@ -390,6 +398,47 @@ def create_video():
                     font-size: 0.875rem;
                     color: var(--text-secondary);
                 }
+                
+                /* Voice selector styles */
+                .voice-selector {
+                    margin-bottom: 1.5rem;
+                }
+
+                .voice-selector label {
+                    display: block;
+                    font-weight: 500;
+                    margin-bottom: 0.5rem;
+                    color: var(--text-secondary);
+                }
+
+                .voice-selector select {
+                    width: 100%;
+                    padding: 0.75rem;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.5rem;
+                    font-size: 1rem;
+                    margin-bottom: 0.5rem;
+                    background-color: white;
+                }
+
+                .voice-preview {
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                    padding: 0.75rem;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.5rem;
+                    background-color: var(--background);
+                }
+
+                .voice-preview audio {
+                    flex-grow: 1;
+                }
+
+                .voice-preview-label {
+                    font-size: 0.875rem;
+                    color: var(--text-secondary);
+                }
             </style>
         </head>
         <body>
@@ -422,6 +471,23 @@ def create_video():
                             <span class="music-preview-label">Preview:</span>
                             <audio id="musicPreview" controls>
                                 <source src="/music/{{ music_files[0] }}" type="audio/mpeg">
+                                Your browser does not support the audio element.
+                            </audio>
+                        </div>
+                    </div>
+                    
+                    <!-- Add voice selector -->
+                    <div class="voice-selector">
+                        <label>Select Voice</label>
+                        <select name="voice_id" id="voiceSelect">
+                            {% for voice in voices %}
+                            <option value="{{ voice.id }}">{{ voice.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="voice-preview">
+                            <span class="voice-preview-label">Preview:</span>
+                            <audio id="voicePreview" controls>
+                                <source src="/voices/{{ voices[0].preview }}" type="audio/mpeg">
                                 Your browser does not support the audio element.
                             </audio>
                         </div>
@@ -490,120 +556,145 @@ def create_video():
                     });
                 });
 
-                // Add music preview functionality
+                // Handle music selection change
                 document.getElementById('musicSelect').addEventListener('change', function() {
-                    const audioPreview = document.getElementById('musicPreview');
-                    audioPreview.src = `/music/${this.value}`;
-                    audioPreview.load();
+                    const selectedMusic = this.value;
+                    const audioPlayer = document.getElementById('musicPreview');
+                    audioPlayer.querySelector('source').src = '/music/' + selectedMusic;
+                    audioPlayer.load();
+                });
+                
+                // Handle voice selection change
+                document.getElementById('voiceSelect').addEventListener('change', function() {
+                    const selectedVoice = this.options[this.selectedIndex].text.toLowerCase();
+                    const audioPlayer = document.getElementById('voicePreview');
+                    audioPlayer.querySelector('source').src = '/voices/' + selectedVoice + '.mp3';
+                    audioPlayer.load();
                 });
 
-                document.getElementById('videoForm').onsubmit = async function(event) {
-                    event.preventDefault();
-                    const form = event.target;
-                    const fileList = document.getElementById('fileList');
-                    const formData = new FormData(form);
-                    const selectedMusic = document.getElementById('musicSelect').value;
-
-                    // Get the actual order of files after drag and drop
-                    const fileOrder = Array.from(fileList.children).map(li => li.dataset.filename);
-
-                    // Reset and show progress elements
-                    const progressDiv = document.getElementById('progress');
+                // Form submission handler
+                document.getElementById('videoForm').addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    const form = this;
+                    const submitBtn = document.getElementById('submitBtn');
                     const progressBar = document.querySelector('.progress-bar');
                     const progressBarFill = document.querySelector('.progress-bar-fill');
+                    const progressDiv = document.getElementById('progress');
                     const downloadBtn = document.getElementById('downloadBtn');
-                    const submitBtn = document.getElementById('submitBtn');
-
-                    progressDiv.style.display = 'block';
-                    progressBar.style.display = 'block';
-                    progressDiv.innerHTML = '';
-                    progressBarFill.style.width = '0%';
-                    downloadBtn.style.display = 'none';
-
-                    // Add loading state
+                    
+                    // Add loading state to submit button
                     submitBtn.classList.add('loading');
-                    submitBtn.value = 'Creating Video...';
                     submitBtn.disabled = true;
-
-                    try {
-                        // First upload the files
-                        const uploadResponse = await fetch('/upload', {
-                            method: 'POST',
-                            body: formData
-                        });
-                        const uploadData = await uploadResponse.json();
-                        
-                        if (!uploadData.success) {
-                            throw new Error(uploadData.error || 'Upload failed');
+                    
+                    // Show progress bar and reset
+                    progressBar.style.display = 'block';
+                    progressBarFill.style.width = '0%';
+                    progressDiv.style.display = 'block';
+                    progressDiv.innerHTML = '<div>Processing your request...</div>';
+                    downloadBtn.style.display = 'none';
+                    
+                    // Prepare form data for upload
+                    const formData = new FormData(form);
+                    const selectedMusic = document.getElementById('musicSelect').value;
+                    const selectedVoice = document.getElementById('voiceSelect').value;
+                    
+                    // Get the actual order of files after drag and drop
+                    const fileList = document.getElementById('fileList');
+                    const fileItems = fileList.querySelectorAll('.file-item');
+                    const fileOrder = [];
+                    
+                    fileItems.forEach(item => {
+                        const filename = item.getAttribute('data-filename');
+                        if (filename) {
+                            fileOrder.push(filename);
                         }
-
-                        // Then reorder the files using the actual UI order
-                        const reorderResponse = await fetch('/reorder', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                                file_order: fileOrder  // Send the actual filenames in UI order
-                            })
-                        });
-                        const reorderData = await reorderResponse.json();
-                        
-                        if (!reorderData.success) {
-                            throw new Error(reorderData.error || 'Reorder failed');
-                        }
-
-                        // Finally start video creation with selected music
-                        const script = form.querySelector('textarea[name="script"]').value;
-                        const eventSource = new EventSource(`/progress?script=${encodeURIComponent(script)}&music=${encodeURIComponent(selectedMusic)}`);
-                        
-                        eventSource.onmessage = function(event) {
-                            if (event.data === 'DONE') {
-                                eventSource.close();
-                                downloadBtn.style.display = 'inline-block';
-                                progressDiv.innerHTML += '<br><span class="success-message">Video created successfully!</span>';
-                                progressBarFill.style.width = '100%';
-                                
-                                // Reset button
-                                submitBtn.classList.remove('loading');
-                                submitBtn.value = 'Create Video';
-                                submitBtn.disabled = false;
-                            } else if (event.data.startsWith('ERROR:')) {
-                                eventSource.close();
-                                progressDiv.innerHTML += '<br><span class="error-message">' + event.data.substring(7) + '</span>';
-                                
-                                // Reset button
-                                submitBtn.classList.remove('loading');
-                                submitBtn.value = 'Create Video';
-                                submitBtn.disabled = false;
-                            } else {
-                                const [message, percentage] = event.data.split('|');
-                                if (percentage) {
-                                    progressBarFill.style.width = percentage + '%';
-                                }
-                                progressDiv.innerHTML += message + '<br>';
-                                progressDiv.scrollTop = progressDiv.scrollHeight;
-                            }
-                        };
-
-                        eventSource.onerror = function() {
-                            eventSource.close();
-                            progressDiv.innerHTML += '<br><span class="error-message">Connection lost</span>';
+                    });
+                    
+                    // First upload all files
+                    fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            progressDiv.innerHTML += '<div>Files uploaded successfully</div>';
                             
-                            // Reset button
-                            submitBtn.classList.remove('loading');
-                            submitBtn.value = 'Create Video';
-                            submitBtn.disabled = false;
-                        };
-                    } catch (error) {
+                            // If we have a custom order, send it to the server
+                            if (fileOrder.length > 0) {
+                                return fetch('/reorder', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({ files: fileOrder })
+                                });
+                            }
+                            return Promise.resolve({ success: true });
+                        } else {
+                            throw new Error(data.error || 'File upload failed');
+                        }
+                    })
+                    .then(response => {
+                        if (response.status === 200 || response.success) {
+                            // If reordering succeeded or wasn't needed, continue
+                            progressDiv.innerHTML += '<div>Starting video creation...</div>';
+                            
+                            // Finally start video creation with selected music and voice
+                            const script = form.querySelector('textarea[name="script"]').value;
+                            const eventSource = new EventSource(`/progress?script=${encodeURIComponent(script)}&music=${encodeURIComponent(selectedMusic)}&voice=${encodeURIComponent(selectedVoice)}`);
+                            
+                            eventSource.onmessage = function(event) {
+                                if (event.data === 'DONE') {
+                                    eventSource.close();
+                                    downloadBtn.style.display = 'inline-block';
+                                    progressDiv.innerHTML += '<br><span class="success-message">Video created successfully!</span>';
+                                    progressBarFill.style.width = '100%';
+                                    
+                                    // Reset button
+                                    submitBtn.classList.remove('loading');
+                                    submitBtn.value = 'Create Video';
+                                    submitBtn.disabled = false;
+                                } else if (event.data.startsWith('ERROR:')) {
+                                    eventSource.close();
+                                    progressDiv.innerHTML += '<br><span class="error-message">' + event.data.substring(7) + '</span>';
+                                    
+                                    // Reset button
+                                    submitBtn.classList.remove('loading');
+                                    submitBtn.value = 'Create Video';
+                                    submitBtn.disabled = false;
+                                } else {
+                                    const [message, percentage] = event.data.split('|');
+                                    if (percentage) {
+                                        progressBarFill.style.width = percentage + '%';
+                                    }
+                                    progressDiv.innerHTML += message + '<br>';
+                                    progressDiv.scrollTop = progressDiv.scrollHeight;
+                                }
+                            };
+
+                            eventSource.onerror = function() {
+                                eventSource.close();
+                                progressDiv.innerHTML += '<br><span class="error-message">Connection lost</span>';
+                                
+                                // Reset button
+                                submitBtn.classList.remove('loading');
+                                submitBtn.value = 'Create Video';
+                                submitBtn.disabled = false;
+                            };
+                        } else {
+                            throw new Error('Reordering failed');
+                        }
+                    })
+                    .catch(error => {
                         progressDiv.innerHTML += '<br><span class="error-message">Error: ' + error.message + '</span>';
                         
                         // Reset button
                         submitBtn.classList.remove('loading');
                         submitBtn.value = 'Create Video';
                         submitBtn.disabled = false;
-                    }
-                };
+                    });
+                });
 
                 // Add this at the start of your script section
                 window.onload = function() {
@@ -618,7 +709,7 @@ def create_video():
             </script>
         </body>
         </html>
-    ''', music_files=music_files)
+    ''', music_files=music_files, voices=voices)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -1274,6 +1365,11 @@ def get_favicon_html():
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
     <link rel="manifest" href="/site.webmanifest">
     '''
+
+# Add route to serve voice preview files
+@app.route('/voices/<filename>')
+def serve_voices(filename):
+    return send_from_directory('src/voices_preview', filename)
 
 if __name__ == '__main__':
     # When running locally, you can access via:
