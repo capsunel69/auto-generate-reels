@@ -40,12 +40,12 @@ app.add_middleware(
 
 # Create necessary directories
 os.makedirs('user_sessions', exist_ok=True)
-os.makedirs('../brolls/default', exist_ok=True)
-os.makedirs('../brolls/user_uploads', exist_ok=True)
+os.makedirs('brolls/default', exist_ok=True)
+os.makedirs('brolls/user_uploads', exist_ok=True)
 
 # Mount static directories
 app.mount("/music", StaticFiles(directory="music"), name="music")
-app.mount("/brolls", StaticFiles(directory="../brolls"), name="brolls")
+app.mount("/brolls", StaticFiles(directory="brolls"), name="brolls")
 app.mount("/favicon", StaticFiles(directory="favicon"), name="favicon")
 
 # Session management
@@ -115,7 +115,7 @@ def get_brolls():
     user_brolls = []
     
     # Get default b-rolls
-    default_dir = Path("../brolls/default")
+    default_dir = Path("brolls/default")
     if default_dir.exists():
         for file in default_dir.glob("*"):
             if file.suffix.lower() in ['.mp4', '.jpg', '.jpeg', '.png']:
@@ -126,7 +126,7 @@ def get_brolls():
                 })
     
     # Get user uploaded b-rolls
-    user_dir = Path("../brolls/user_uploads")
+    user_dir = Path("brolls/user_uploads")
     if user_dir.exists():
         for file in user_dir.glob("*"):
             if file.suffix.lower() in ['.mp4', '.jpg', '.jpeg', '.png']:
@@ -153,7 +153,7 @@ async def upload_broll(file: UploadFile = File(...)):
     
     # Generate unique filename
     unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = Path("../brolls/user_uploads") / unique_filename
+    file_path = Path("brolls/user_uploads") / unique_filename
     
     # Save file
     try:
@@ -175,7 +175,7 @@ async def delete_broll(type: str, filename: str):
     if type not in ["default", "user_uploads"]:
         raise HTTPException(status_code=400, detail="Invalid b-roll type")
     
-    file_path = Path(f"../brolls/{type}/{filename}")
+    file_path = Path(f"brolls/{type}/{filename}")
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
@@ -205,8 +205,8 @@ async def create_video_endpoint(request: VideoRequest):
                 broll_files = []
                 for broll in request.selected_brolls:
                     # Check in both default and user_uploads directories
-                    default_path = Path("../brolls/default") / broll
-                    user_path = Path("../brolls/user_uploads") / broll
+                    default_path = Path("brolls/default") / broll
+                    user_path = Path("brolls/user_uploads") / broll
                     
                     if default_path.exists():
                         broll_files.append(str(default_path))
