@@ -48,6 +48,7 @@ os.makedirs('brolls/thumbnails', exist_ok=True)  # Add thumbnails directory
 app.mount("/music", StaticFiles(directory="music"), name="music")
 app.mount("/brolls", StaticFiles(directory="brolls"), name="brolls")
 app.mount("/favicon", StaticFiles(directory="favicon"), name="favicon")
+app.mount("/voices_preview", StaticFiles(directory="src/voices_preview"), name="voices_preview")
 
 # Session management
 active_sessions: Dict[str, Dict] = {}
