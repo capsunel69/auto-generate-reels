@@ -1,12 +1,29 @@
 # Auto-Generate Reels
 
-Video generation application with Python backend and React frontend.
+Video generation application with Python FastAPI backend and React frontend.
 
 ## Project Structure
 
 The project consists of two main parts:
 1. **FastAPI Backend**: Processes video creation requests and serves files
 2. **React Frontend**: Provides the user interface for the application
+
+## Directory Structure
+
+```
+auto-generate-reels/
+├── app/
+│   ├── fastapi_app.py      # FastAPI application
+│   ├── video_creator.py    # Video creation logic
+│   └── run_api.py         # API server runner
+├── brolls/
+│   ├── default/           # Default b-roll videos and images
+│   └── user_uploads/      # User-uploaded b-roll content
+├── music/                 # Background music files
+├── react-example/
+│   └── VideoCreator.jsx   # React component for video creation
+└── requirements.txt       # Python dependencies
+```
 
 ## Setup Instructions
 
@@ -17,17 +34,22 @@ The project consists of two main parts:
    pip install -r requirements.txt
    ```
 
-2. Start the FastAPI server:
+2. Set up environment variables in a `.env` file:
+   ```
+   ELEVENLABS_API_KEY=your_elevenlabs_api_key
+   OPENAI_API_KEY=your_openai_api_key
+   GOOGLE_APPLICATION_CREDENTIALS=path_to_google_credentials.json
+   ```
+
+3. Start the FastAPI server:
    ```bash
    cd app
-   python fastapi_app.py
+   python run_api.py
    ```
    
    The server will start on http://localhost:8000
 
 ### Frontend Setup
-
-Your React Vite frontend should be in a separate directory. Follow these steps to set it up:
 
 1. Create a new Vite React app if you don't have one already:
    ```bash
@@ -38,7 +60,7 @@ Your React Vite frontend should be in a separate directory. Follow these steps t
 
 2. Install required dependencies:
    ```bash
-   npm install axios
+   npm install axios tailwindcss @tailwindcss/forms
    ```
 
 3. Copy the `VideoCreator.jsx` component from `react-example/` to your React app's components directory.
@@ -65,6 +87,17 @@ Your React Vite frontend should be in a separate directory. Follow these steps t
    npm run dev
    ```
 
+## B-roll Management
+
+The application supports two types of b-roll content:
+
+1. **Default B-rolls**: Pre-installed videos and images in the `brolls/default/` directory
+2. **User Uploads**: User-uploaded content stored in `brolls/user_uploads/`
+
+To add default b-rolls:
+1. Place your video files (MP4) or images (JPG, PNG) in the `brolls/default/` directory
+2. The files will automatically appear in the b-roll selection interface
+
 ## API Endpoints
 
 The FastAPI backend provides the following endpoints:
@@ -72,16 +105,43 @@ The FastAPI backend provides the following endpoints:
 - `GET /`: API root
 - `GET /music-list`: List available music files
 - `GET /voices`: List available voices
+- `GET /brolls`: List available b-rolls (both default and user uploads)
+- `POST /upload-broll`: Upload a new b-roll file
+- `DELETE /brolls/{type}/{filename}`: Delete a b-roll file
 - `POST /create-video`: Create a new video (Server-Sent Events for progress)
 - `GET /download/{video_id}`: Download the generated video
-- `POST /upload`: Upload additional files
-- `POST /reorder`: Reorder files for the video
 
 ## Environment Variables
 
-If your app requires specific environment variables, create a `.env` file in the backend directory with necessary values.
+Create a `.env` file in the backend directory with the following variables:
+
+```
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+OPENAI_API_KEY=your_openai_api_key
+GOOGLE_APPLICATION_CREDENTIALS=path_to_google_credentials.json
+```
 
 ## Troubleshooting
 
 - **CORS Issues**: The FastAPI backend has CORS configured to allow all origins during development. For production, update the `allow_origins` list in `fastapi_app.py`.
-- **Connection Problems**: Ensure the API_BASE_URL in the React component matches your FastAPI server address.
+- **File Upload Issues**: Ensure the `brolls` directory and its subdirectories have proper write permissions.
+- **Video Creation Errors**: Check the console logs for detailed error messages. Common issues include missing API keys or insufficient disk space.
+
+## Production Deployment
+
+For production deployment:
+
+1. Update CORS settings in `fastapi_app.py` to only allow your frontend domain
+2. Set up proper environment variables
+3. Use a production-grade server like Gunicorn with Uvicorn workers
+4. Consider using a CDN for serving static files (b-rolls, music)
+5. Implement proper authentication and rate limiting
+6. Set up proper logging and monitoring
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request

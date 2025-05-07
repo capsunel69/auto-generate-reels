@@ -720,13 +720,13 @@ def cleanup_broll():
     the final video. This tries to delete all uploaded b-roll files.
     """
     print("Attempting to clean up b-roll...")
-    uploads_dir = "uploads"
+    uploads_dir = "../brolls/user_uploads"
     
     # Define allowed file extensions
     allowed_extensions = ('.mp4', '.jpg', '.jpeg', '.png')
     
     for file in os.listdir(uploads_dir):
-        if file.startswith("uploaded_broll_") and file.lower().endswith(allowed_extensions):
+        if file.lower().endswith(allowed_extensions):
             file_path = os.path.join(uploads_dir, file)
             # Try multiple times with delays
             for attempt in range(3):
@@ -739,7 +739,7 @@ def cleanup_broll():
                     if attempt == 2:  # Only print error on last attempt
                         print(f"Warning: Could not delete uploaded b-roll {file}: {str(e)}")
 
-def create_romanian_video(romanian_script, session_id, selected_music="funny 2.mp3", voice_id="gbLy9ep70G3JW53cTzFC", progress_callback=None):
+def create_romanian_video(romanian_script, session_id, selected_music="funny 2.mp3", voice_id="gbLy9ep70G3JW53cTzFC", progress_callback=None, broll_files=None):
     """Modified to accept selected_music and voice_id parameters"""
     user_dir, uploads_dir = create_user_directory(session_id)
     
@@ -767,7 +767,7 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
         if progress_callback:
-            yield from progress_callback("Generating audio file...|10")
+            progress_callback("Generating audio file...|10")
         # Generate audio using ElevenLabs with voice parameters
         print("Generating audio file...")
         audio_stream = client.text_to_speech.convert_as_stream(
@@ -797,7 +797,7 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         client = OpenAI(api_key=OPENAI_API_KEY)
         
         if progress_callback:
-            yield from progress_callback("Generating subtitles...|30")
+            progress_callback("Generating subtitles...|30")
         print("Generating subtitles...")
         
         # Get word-level timestamps from Google Cloud
@@ -819,34 +819,12 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
             json.dump(aligned_words, f, indent=2)
 
         if progress_callback:
-            yield from progress_callback("Creating video...|50")
+            progress_callback("Creating video...|50")
         print("Creating video...")
         audio_clip = AudioFileClip(audio_path)
         total_duration = audio_clip.duration
 
-        # Update broll file handling
-        broll_files = []
-        order_file = os.path.join(uploads_dir, "order.json")
-        
-        # First check if order.json exists and use its order
-        if os.path.exists(order_file):
-            with open(order_file, 'r') as f:
-                ordered_filenames = json.load(f)
-                # Use the exact order from order.json
-                for filename in ordered_filenames:
-                    file_path = os.path.join(uploads_dir, filename)
-                    if os.path.exists(file_path):
-                        broll_files.append(file_path)
-        
-        # If no files were found from order.json, fall back to default behavior
-        if not broll_files:
-            for file in os.listdir(uploads_dir):
-                if (file.startswith("uploaded_broll_") and 
-                    file.lower().endswith(('.mp4', '.jpg', '.jpeg', '.png'))):
-                    file_path = os.path.join(uploads_dir, file)
-                    broll_files.append(file_path)
-        
-        # If still no files, use default
+        # Use provided b-roll files or fall back to default behavior
         if not broll_files:
             broll_files = ["src/placeholder-broll.mp4"]
 
@@ -889,7 +867,7 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
             processed_clips.append(clip)
 
         # Add a small buffer at the end of the video
-        CLIP_DURATION = 5  # Duration for each clip in seconds
+        CLIP_DURATION = 5
         BUFFER_DURATION = 0.5  # seconds of buffer at the end
         
         # Calculate how many times we need to loop through clips
@@ -945,15 +923,16 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         # Create SSELogger instance with a proper callback
         def sse_callback(msg):
             if progress_callback:
-                yield from progress_callback(msg)
+                progress_callback(msg)
                 
         sse_logger = SSELogger(sse_callback=sse_callback)
         
-        yield from progress_callback("Rendering video (it may take a while)...|60")
+        if progress_callback:
+            progress_callback("Rendering video (it may take a while)...|60")
         final_clip.write_videofile(
             output_path,
             fps=30,
-            logger='bar',
+            logger=sse_logger,
             temp_audiofile=temp_audio_path
         )
 
@@ -967,7 +946,7 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         # Update subtitle creation to use user directory
         if os.path.exists(srt_path):
             if progress_callback:
-                yield from progress_callback("Adding styled subtitles...|90")
+                progress_callback("Adding styled subtitles...|90")
             print("Adding styled subtitles...")
             ass_file = create_subtitle_clips(srt_path, (1080, 1920), user_dir)
             if ass_file and os.path.exists(ass_file):
@@ -988,7 +967,7 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
 
         # Let the user see the "download" button
         if progress_callback:
-            yield from progress_callback("Video creation complete! |100")
+            progress_callback("Video creation complete! |100")
         print("Video creation complete!")
 
         # Clean up the clip resources before returning
@@ -1004,10 +983,12 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         # Optional small delay for Windows to release file handles
         time.sleep(1)
 
-        return True
+        return final_output  # Return the path to the final video instead of True
         
     except Exception as e:
         print(f"Error creating video: {str(e)}")
+        if progress_callback:
+            progress_callback(f"ERROR: {str(e)}")
         raise e
 
     finally:
@@ -1027,9 +1008,6 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         # Force garbage collection
         import gc
         gc.collect()
-
-        # Remove cleanup_user_files call from here
-        # We'll let the download route handle cleanup after successful download
 
 if __name__ == "__main__":
     create_romanian_video()
