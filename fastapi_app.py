@@ -42,6 +42,7 @@ app.add_middleware(
 os.makedirs('user_sessions', exist_ok=True)
 os.makedirs('brolls/default', exist_ok=True)
 os.makedirs('brolls/user_uploads', exist_ok=True)
+os.makedirs('brolls/thumbnails', exist_ok=True)  # Add thumbnails directory
 
 # Mount static directories
 app.mount("/music", StaticFiles(directory="music"), name="music")
@@ -75,6 +76,51 @@ def get_session_dir(session_id: str) -> Path:
             'last_activity': datetime.now()
         }
     return session_dir
+
+def generate_thumbnail(video_path: Path) -> Optional[str]:
+    """Generate thumbnail for a video file"""
+    if not video_path.suffix.lower() == '.mp4':
+        return None
+        
+    thumbnail_name = f"{video_path.stem}.jpg"
+    thumbnail_path = Path("brolls/thumbnails") / thumbnail_name
+    
+    # Skip if thumbnail already exists
+    if thumbnail_path.exists():
+        return str(thumbnail_path)
+        
+    try:
+        import subprocess
+        # Generate thumbnail at 1 second mark
+        subprocess.run([
+            'ffmpeg', '-i', str(video_path),
+            '-ss', '00:00:01.000',
+            '-vframes', '1',
+            str(thumbnail_path)
+        ], check=True)
+        logger.info(f"Generated thumbnail: {thumbnail_path}")
+        return str(thumbnail_path)
+    except Exception as e:
+        logger.error(f"Failed to generate thumbnail for {video_path}: {e}")
+        return None
+
+def generate_all_thumbnails():
+    """Generate thumbnails for all video files"""
+    logger.info("Generating thumbnails for all videos...")
+    
+    # Process default b-rolls
+    default_dir = Path("brolls/default")
+    if default_dir.exists():
+        for video in default_dir.glob("*.mp4"):
+            generate_thumbnail(video)
+    
+    # Process user uploaded b-rolls
+    user_dir = Path("brolls/user_uploads")
+    if user_dir.exists():
+        for video in user_dir.glob("*.mp4"):
+            generate_thumbnail(video)
+            
+    logger.info("Finished generating thumbnails")
 
 # Models
 class VideoRequest(BaseModel):
@@ -114,27 +160,56 @@ def get_brolls():
     default_brolls = []
     user_brolls = []
     
+    def get_thumbnail_url(file_path: Path) -> Optional[str]:
+        """Get thumbnail URL for a file if it exists"""
+        if file_path.suffix.lower() in ['.mp4']:
+            # For video files, check if thumbnail exists
+            thumbnail_name = f"{file_path.stem}.jpg"
+            thumbnail_path = Path("brolls/thumbnails") / thumbnail_name
+            if thumbnail_path.exists():
+                # Return the URL path that will be served by the static file handler
+                return f"/brolls/thumbnails/{thumbnail_name}"
+        return None
+    
     # Get default b-rolls
     default_dir = Path("brolls/default")
     if default_dir.exists():
         for file in default_dir.glob("*"):
             if file.suffix.lower() in ['.mp4', '.jpg', '.jpeg', '.png']:
-                default_brolls.append({
+                broll_info = {
                     "filename": file.name,
                     "type": "default",
                     "url": f"/brolls/default/{file.name}"
-                })
+                }
+                
+                # Add thumbnail URL if available
+                if file.suffix.lower() == '.mp4':
+                    thumbnail_url = get_thumbnail_url(file)
+                    if thumbnail_url:
+                        broll_info["thumbnail_url"] = thumbnail_url
+                        logger.info(f"Found thumbnail for {file.name}: {thumbnail_url}")
+                
+                default_brolls.append(broll_info)
     
     # Get user uploaded b-rolls
     user_dir = Path("brolls/user_uploads")
     if user_dir.exists():
         for file in user_dir.glob("*"):
             if file.suffix.lower() in ['.mp4', '.jpg', '.jpeg', '.png']:
-                user_brolls.append({
+                broll_info = {
                     "filename": file.name,
                     "type": "user_upload",
                     "url": f"/brolls/user_uploads/{file.name}"
-                })
+                }
+                
+                # Add thumbnail URL if available
+                if file.suffix.lower() == '.mp4':
+                    thumbnail_url = get_thumbnail_url(file)
+                    if thumbnail_url:
+                        broll_info["thumbnail_url"] = thumbnail_url
+                        logger.info(f"Found thumbnail for {file.name}: {thumbnail_url}")
+                
+                user_brolls.append(broll_info)
     
     return {
         "default_brolls": default_brolls,
@@ -159,15 +234,29 @@ async def upload_broll(file: UploadFile = File(...)):
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+            
+        # For video files, generate thumbnail
+        if file_ext.lower() == '.mp4':
+            generate_thumbnail(file_path)
+                
     except Exception as e:
         logger.error(f"Failed to save file: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
-    return {
+    # Return response with thumbnail URL if available
+    response_data = {
         "filename": unique_filename,
         "type": "user_upload",
         "url": f"/brolls/user_uploads/{unique_filename}"
     }
+    
+    if file_ext.lower() == '.mp4':
+        thumbnail_name = f"{file_path.stem}.jpg"
+        thumbnail_path = Path("brolls/thumbnails") / thumbnail_name
+        if thumbnail_path.exists():
+            response_data["thumbnail_url"] = f"/brolls/thumbnails/{thumbnail_name}"
+    
+    return response_data
 
 @app.delete("/brolls/{type}/{filename}")
 async def delete_broll(type: str, filename: str):
@@ -308,6 +397,9 @@ def download_video(session_id: str, background_tasks: BackgroundTasks):
 @app.on_event("startup")
 async def startup_event():
     """Start cleanup task on startup and configure workers"""
+    # Generate thumbnails for all videos on startup
+    generate_all_thumbnails()
+    
     async def cleanup_task():
         while True:
             cleanup_old_sessions()
