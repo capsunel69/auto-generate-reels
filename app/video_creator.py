@@ -24,7 +24,7 @@ import threading
 import uuid
 
 # Set the path to your Google Cloud credentials JSON file
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'dogwood-boulder-392113-d8917a17686f.json'
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'dogwood-boulder-392113-15af4dd46744.json'
 
 def format_timestamp(seconds):
     """Convert seconds to SRT timestamp format"""
