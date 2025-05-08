@@ -277,10 +277,30 @@ async def upload_broll(file: UploadFile = File(...), user_id: str = Depends(get_
     user_dir = get_user_brolls_dir(user_id)
     file_path = user_dir / unique_filename
     
-    # Save file
+    # Save file with progress tracking
     try:
+        # Get content length if available
+        content_length = int(file.headers.get("content-length", 0))
+        
+        # Create a chunked upload with progress tracking
+        chunk_size = 1024 * 1024  # 1MB chunks
+        total_read = 0
+        progress = 0
+        
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            # Read file in chunks to track progress
+            while chunk := await file.read(chunk_size):
+                buffer.write(chunk)
+                total_read += len(chunk)
+                
+                # Update progress percentage if content length is known
+                if content_length > 0:
+                    new_progress = int((total_read / content_length) * 100)
+                    if new_progress > progress and new_progress % 10 == 0:  # Log every 10%
+                        progress = new_progress
+                        logger.info(f"Upload progress for {unique_filename}: {progress}%")
+            
+        logger.info(f"Upload complete: {unique_filename}, size: {total_read} bytes")
             
         # For video files, generate thumbnail
         if file_ext.lower() == '.mp4':
@@ -288,13 +308,19 @@ async def upload_broll(file: UploadFile = File(...), user_id: str = Depends(get_
                 
     except Exception as e:
         logger.error(f"Failed to save file: {e}")
+        if file_path.exists():
+            try:
+                os.remove(file_path)
+            except:
+                pass
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
     # Return response with thumbnail URL if available
     response_data = {
         "filename": unique_filename,
         "type": "user_upload",
-        "url": f"/brolls/user_uploads/{user_id}/{unique_filename}"
+        "url": f"/brolls/user_uploads/{user_id}/{unique_filename}",
+        "size": total_read
     }
     
     if file_ext.lower() == '.mp4':
