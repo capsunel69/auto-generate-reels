@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, Request, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, Request, HTTPException, Depends, Cookie, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -52,6 +52,28 @@ app.mount("/voices_preview", StaticFiles(directory="src/voices_preview"), name="
 
 # Session management
 active_sessions: Dict[str, Dict] = {}
+
+# Get or create user ID from request
+async def get_user_id(
+    x_user_id: Optional[str] = Header(None),
+    user_id: Optional[str] = Cookie(None)
+) -> str:
+    """
+    Get user ID from header or cookie, or generate a new one.
+    In a real app, this would be an authentication system.
+    """
+    if x_user_id:
+        return x_user_id
+    if user_id:
+        return user_id
+    # Generate a new user ID if none exists
+    return str(uuid.uuid4())
+
+def get_user_brolls_dir(user_id: str) -> Path:
+    """Get or create a user-specific b-rolls directory"""
+    user_dir = Path(f"brolls/user_uploads/{user_id}")
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return user_dir
 
 def cleanup_old_sessions():
     """Clean up sessions older than 1 hour"""
@@ -118,8 +140,10 @@ def generate_all_thumbnails():
     # Process user uploaded b-rolls
     user_dir = Path("brolls/user_uploads")
     if user_dir.exists():
-        for video in user_dir.glob("*.mp4"):
-            generate_thumbnail(video)
+        for user_folder in user_dir.glob("*"):
+            if user_folder.is_dir():
+                for video in user_folder.glob("*.mp4"):
+                    generate_thumbnail(video)
             
     logger.info("Finished generating thumbnails")
 
@@ -135,10 +159,18 @@ class BrollInfo(BaseModel):
     type: str
     thumbnail_url: Optional[str] = None
 
+class UserInfo(BaseModel):
+    user_id: str
+
 # API routes
 @app.get("/")
 def read_root():
     return {"message": "Video Creator API"}
+
+@app.get("/user")
+async def get_user_info(user_id: str = Depends(get_user_id)):
+    """Return the current user's ID"""
+    return {"user_id": user_id}
 
 @app.get("/music-list")
 def get_music_list():
@@ -156,8 +188,8 @@ def get_voices():
     return {"voices": voices}
 
 @app.get("/brolls")
-def get_brolls():
-    """Get list of available b-rolls (both default and user uploads)"""
+async def get_brolls(user_id: str = Depends(get_user_id)):
+    """Get list of available b-rolls (both default and user-specific uploads)"""
     default_brolls = []
     user_brolls = []
     
@@ -193,14 +225,14 @@ def get_brolls():
                 default_brolls.append(broll_info)
     
     # Get user uploaded b-rolls
-    user_dir = Path("brolls/user_uploads")
+    user_dir = get_user_brolls_dir(user_id)
     if user_dir.exists():
         for file in user_dir.glob("*"):
             if file.suffix.lower() in ['.mp4', '.jpg', '.jpeg', '.png']:
                 broll_info = {
                     "filename": file.name,
                     "type": "user_upload",
-                    "url": f"/brolls/user_uploads/{file.name}"
+                    "url": f"/brolls/user_uploads/{user_id}/{file.name}"
                 }
                 
                 # Add thumbnail URL if available
@@ -212,14 +244,27 @@ def get_brolls():
                 
                 user_brolls.append(broll_info)
     
-    return {
+    # Generate a response with Set-Cookie header to persist the user ID
+    response = JSONResponse(content={
         "default_brolls": default_brolls,
-        "user_brolls": user_brolls
-    }
+        "user_brolls": user_brolls,
+        "user_id": user_id
+    })
+    
+    # Set the user ID as a cookie (30 days expiry)
+    response.set_cookie(
+        key="user_id",
+        value=user_id,
+        max_age=60*60*24*30,
+        httponly=True,
+        samesite="lax"
+    )
+    
+    return response
 
 @app.post("/upload-broll")
-async def upload_broll(file: UploadFile = File(...)):
-    """Upload a new b-roll file"""
+async def upload_broll(file: UploadFile = File(...), user_id: str = Depends(get_user_id)):
+    """Upload a new b-roll file for a specific user"""
     # Validate file type
     allowed_types = ['.mp4', '.jpg', '.jpeg', '.png']
     file_ext = os.path.splitext(file.filename)[1].lower()
@@ -229,7 +274,8 @@ async def upload_broll(file: UploadFile = File(...)):
     
     # Generate unique filename
     unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = Path("brolls/user_uploads") / unique_filename
+    user_dir = get_user_brolls_dir(user_id)
+    file_path = user_dir / unique_filename
     
     # Save file
     try:
@@ -248,7 +294,7 @@ async def upload_broll(file: UploadFile = File(...)):
     response_data = {
         "filename": unique_filename,
         "type": "user_upload",
-        "url": f"/brolls/user_uploads/{unique_filename}"
+        "url": f"/brolls/user_uploads/{user_id}/{unique_filename}"
     }
     
     if file_ext.lower() == '.mp4':
@@ -260,25 +306,38 @@ async def upload_broll(file: UploadFile = File(...)):
     return response_data
 
 @app.delete("/brolls/{type}/{filename}")
-async def delete_broll(type: str, filename: str):
+async def delete_broll(type: str, filename: str, user_id: str = Depends(get_user_id)):
     """Delete a b-roll file"""
     if type not in ["default", "user_uploads"]:
         raise HTTPException(status_code=400, detail="Invalid b-roll type")
     
-    file_path = Path(f"brolls/{type}/{filename}")
+    # Only allow deletion of user's own b-rolls
+    if type == "user_uploads":
+        file_path = Path(f"brolls/user_uploads/{user_id}/{filename}")
+    else:
+        # Admin-only operation in a real app
+        file_path = Path(f"brolls/{type}/{filename}")
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     
     try:
         os.remove(file_path)
+        
+        # Also remove thumbnail if it exists
+        if file_path.suffix.lower() == '.mp4':
+            thumbnail_name = f"{file_path.stem}.jpg"
+            thumbnail_path = Path("brolls/thumbnails") / thumbnail_name
+            if thumbnail_path.exists():
+                os.remove(thumbnail_path)
+                
         return {"message": "File deleted successfully"}
     except Exception as e:
         logger.error(f"Failed to delete file: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
 
 @app.post("/create-video")
-async def create_video_endpoint(request: VideoRequest):
+async def create_video_endpoint(request: VideoRequest, user_id: str = Depends(get_user_id)):
     """Create a video with the given script and selected resources"""
     try:
         # Generate a unique session ID
@@ -294,9 +353,10 @@ async def create_video_endpoint(request: VideoRequest):
                 # Process selected b-rolls
                 broll_files = []
                 for broll in request.selected_brolls:
-                    # Check in both default and user_uploads directories
+                    # Check in default directory
                     default_path = Path("brolls/default") / broll
-                    user_path = Path("brolls/user_uploads") / broll
+                    # Check in user-specific directory
+                    user_path = Path(f"brolls/user_uploads/{user_id}") / broll
                     
                     if default_path.exists():
                         broll_files.append(str(default_path))
@@ -392,6 +452,108 @@ def download_video(session_id: str, background_tasks: BackgroundTasks):
         raise
     except Exception as e:
         logger.error(f"Error in download_video: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/delete-user-brolls/{session_id}")
+async def delete_user_brolls(session_id: str, user_id: str = Depends(get_user_id)):
+    """Delete all user uploaded b-rolls after successful video creation"""
+    try:
+        # Verify the session exists
+        session_dir = Path("user_sessions") / session_id
+        if not session_dir.exists():
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Get a list of all user-uploaded b-rolls for this specific user
+        user_dir = Path(f"brolls/user_uploads/{user_id}")
+        if not user_dir.exists():
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "message": "No user b-rolls to delete",
+                    "deleted_count": 0
+                }
+            )
+            
+        user_brolls = list(user_dir.glob("*"))
+        deleted_count = 0
+        failed_files = []
+        
+        # Add files to background task for deletion with retries
+        # This allows the HTTP response to return while deletion continues
+        background_tasks = BackgroundTasks()
+        
+        def delete_with_retries():
+            nonlocal deleted_count, failed_files
+            import time
+            
+            # First attempt - try to delete all files
+            for file_path in user_brolls:
+                try:
+                    # Delete the file
+                    os.remove(file_path)
+                    
+                    # Also delete any thumbnails
+                    if file_path.suffix.lower() == '.mp4':
+                        thumbnail_name = f"{file_path.stem}.jpg"
+                        thumbnail_path = Path("brolls/thumbnails") / thumbnail_name
+                        if thumbnail_path.exists():
+                            os.remove(thumbnail_path)
+                    
+                    deleted_count += 1
+                    logger.info(f"Deleted uploaded b-roll: {file_path}")
+                except Exception as e:
+                    logger.warning(f"First attempt: Error deleting b-roll {file_path}: {e}")
+                    failed_files.append(file_path)
+            
+            # If there are any failed files, wait and retry
+            if failed_files:
+                # Wait for 5 seconds to allow processes to release file locks
+                time.sleep(5)
+                retry_files = failed_files.copy()
+                failed_files.clear()
+                
+                # Second attempt - try each file that failed before
+                for file_path in retry_files:
+                    try:
+                        # Try deleting the file again
+                        os.remove(file_path)
+                        
+                        # Also delete any thumbnails
+                        if file_path.suffix.lower() == '.mp4':
+                            thumbnail_name = f"{file_path.stem}.jpg"
+                            thumbnail_path = Path("brolls/thumbnails") / thumbnail_name
+                            if thumbnail_path.exists():
+                                os.remove(thumbnail_path)
+                        
+                        deleted_count += 1
+                        logger.info(f"Deleted uploaded b-roll on second attempt: {file_path}")
+                    except Exception as e:
+                        logger.error(f"Second attempt: Error deleting b-roll {file_path}: {e}")
+                        # Add to failed files list for final report
+                        failed_files.append(file_path)
+            
+            # Log final summary
+            if failed_files:
+                logger.warning(f"Failed to delete {len(failed_files)} b-roll files after retries")
+            else:
+                logger.info(f"Successfully deleted all {deleted_count} b-roll files")
+        
+        # Schedule deletion task in background
+        background_tasks.add_task(delete_with_retries)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": f"Scheduled deletion of {len(user_brolls)} uploaded b-rolls",
+                "scheduled_count": len(user_brolls)
+            },
+            background=background_tasks
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in delete_user_brolls: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Cleanup task
