@@ -35,7 +35,8 @@ app.add_middleware(
     allow_origins=["*"],  # For development. In production, set to your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-User-ID", "Content-Type", "Authorization"],
+    expose_headers=["Content-Type", "Content-Length"]
 )
 
 # Create necessary directories
@@ -370,12 +371,26 @@ async def create_video_endpoint(request: VideoRequest, user_id: str = Depends(ge
         session_id = str(uuid.uuid4())
         session_dir = get_session_dir(session_id)
         
-        # Create a queue for progress messages
+        # Create a queue for progress messages that will be shared between threads
         progress_queue = asyncio.Queue()
         
-        # Create an async event generator
+        # Create an initial progress message
+        await progress_queue.put(json.dumps({
+            'status': 'progress',
+            'message': 'Starting video creation...',
+            'percentage': 0
+        }))
+        
+        # Create an async event generator for SSE
         async def event_generator():
             try:
+                logger.info(f"SSE connection established for session_id: {session_id}")
+                
+                # First send an initial message to establish the connection
+                message = json.dumps({'status': 'progress', 'message': 'Starting video creation...', 'percentage': 0})
+                yield f"data: {message}\n\n"
+                await asyncio.sleep(0.01)  # Small delay to ensure message is sent
+                
                 # Process selected b-rolls
                 broll_files = []
                 for broll in request.selected_brolls:
@@ -393,19 +408,47 @@ async def create_video_endpoint(request: VideoRequest, user_id: str = Depends(ge
                 
                 logger.info(f"Selected brolls: {broll_files}")
                 
-                # Create progress callback that uses the main event loop
+                # Create progress callback that immediately sends SSE messages
                 main_loop = asyncio.get_event_loop()
+                
                 def progress_callback(message):
+                    # Parse the message for percentage if available
+                    percentage = None
+                    message_text = message
+                    
+                    if '|' in message:
+                        try:
+                            message_text, percentage_str = message.split('|')
+                            percentage = float(percentage_str)
+                            message_text = message_text.strip()
+                            logger.info(f"Progress update - Message: {message_text}, Percentage: {percentage}")
+                        except Exception as e:
+                            logger.error(f"Error parsing progress message: {message} - Error: {e}")
+                            percentage = None
+                    
+                    # Create progress data
+                    progress_data = {
+                        'status': 'progress',
+                        'message': message_text
+                    }
+                    if percentage is not None:
+                        progress_data['percentage'] = percentage
+                        
+                    # Log the progress data being sent
+                    logger.info(f"Queueing progress data: {progress_data}")
+                    
+                    # Put the message in the queue from the background thread
                     if main_loop.is_running():
                         main_loop.call_soon_threadsafe(
-                            lambda: asyncio.create_task(progress_queue.put(message))
+                            lambda: asyncio.create_task(
+                                progress_queue.put(json.dumps(progress_data))
+                            )
                         )
                 
-                # Start video creation task in a separate thread
-                loop = asyncio.get_event_loop()
-                video_path = await loop.run_in_executor(
-                    None,
-                    lambda: create_romanian_video(
+                # Start video creation in a background task
+                video_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        create_romanian_video,
                         romanian_script=request.script,
                         session_id=session_id,
                         selected_music=request.music,
@@ -415,26 +458,80 @@ async def create_video_endpoint(request: VideoRequest, user_id: str = Depends(ge
                     )
                 )
                 
-                # Wait for task to complete
+                # While the video is being created, stream progress updates
+                video_path = None
                 while True:
+                    # Check if video task is done
+                    if video_task.done():
+                        # Get the result (or raise exception if it failed)
+                        video_path = video_task.result()
+                        # We still need to process any remaining messages in the queue
+                        if progress_queue.empty():
+                            break
+                    
                     try:
-                        message = await asyncio.wait_for(progress_queue.get(), timeout=1.0)
-                        if "ERROR:" in message:
-                            yield f"data: {json.dumps({'error': message.replace('ERROR:', '').strip()})}\n\n"
-                            break
-                        elif "Video creation complete!" in message:
-                            yield f"data: {json.dumps({'status': 'complete', 'session_id': session_id})}\n\n"
-                            break
-                        else:
-                            yield f"data: {json.dumps({'status': 'progress', 'message': message})}\n\n"
+                        # Get message with a short timeout
+                        message = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
+                        logger.info(f"Sending SSE message: {message}")
+                        
+                        # Send the message immediately
+                        yield f"data: {message}\n\n"
+                        await asyncio.sleep(0.01)  # Small delay to ensure message is sent
+                        
+                        # Check if this is a completion message
+                        try:
+                            data = json.loads(message)
+                            if isinstance(data, dict) and "Video creation complete!" in str(data.get('message', '')):
+                                logger.info("Detected completion message, will send final status after processing queue")
+                        except json.JSONDecodeError:
+                            pass
+                            
                     except asyncio.TimeoutError:
+                        # No message available, just continue and check video_task again
+                        await asyncio.sleep(0.1)
                         continue
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing message: {e}")
+                        error_msg = json.dumps({'error': str(e)})
+                        yield f"data: {error_msg}\n\n"
+                        await asyncio.sleep(0.01)  # Small delay to ensure message is sent
+                        raise
+                
+                # Send the final completion message
+                complete_message = json.dumps({
+                    'status': 'complete',
+                    'session_id': session_id,
+                    'video_path': video_path
+                })
+                logger.info(f"Sending completion message: {complete_message}")
+                yield f"data: {complete_message}\n\n"
+                await asyncio.sleep(0.01)  # Small delay to ensure message is sent
+                logger.info(f"SSE connection completed for session_id: {session_id}")
                     
             except Exception as e:
-                logger.error(f"Error in video task: {e}")
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                error_msg = str(e)
+                logger.error(f"Error in video task: {error_msg}")
+                error_data = json.dumps({'error': error_msg})
+                yield f"data: {error_data}\n\n"
+                await asyncio.sleep(0.01)  # Small delay to ensure message is sent
+                # Make sure we cancel the video task if it's still running
+                if 'video_task' in locals() and not video_task.done():
+                    video_task.cancel()
+                logger.error(f"SSE connection terminated with error for session_id: {session_id}")
         
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
+        # Return the streaming response with SSE
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "Content-Type": "text/event-stream",
+                "X-Accel-Buffering": "no",  # Disable buffering in Nginx
+                "Access-Control-Allow-Origin": "*"  # For CORS - in production use your actual origin
+            }
+        )
         
     except Exception as e:
         logger.error(f"Error in create_video_endpoint: {e}")

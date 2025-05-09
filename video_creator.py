@@ -63,29 +63,41 @@ class SSELogger(ProgressBarLogger):
         self.print_progress = True
         self.current_frame = 0
         self.total_frames = 0
+        self.last_progress = 0
 
     def callback(self, **changes):
         # This call ensures MoviePy's built-in progress bar is displayed
         super().callback(**changes)
 
+        if not self.sse_callback:
+            return
+
         # Get the message from changes
         message = changes.get('message', '')
         
-        if self.sse_callback:
+        # Handle different types of progress updates
+        if 'frame' in changes and 'total' in changes:
+            current = changes['frame']
+            total = changes['total']
+            if total > 0:
+                progress = (current / total) * 100
+                # Only send update if progress has changed significantly (more than 1%)
+                if progress - self.last_progress >= 1:
+                    self.last_progress = progress
+                    self.sse_callback(f"Rendering video - Processing frames ({progress:.0f}%)|{progress}")
+        elif message:
+            # Map different messages to appropriate progress stages
             if 'Building video' in message:
-                self.sse_callback("Rendering video - Preparing...")
+                self.sse_callback("Rendering video - Preparing...|80")
             elif 'Writing audio' in message:
-                self.sse_callback("Rendering video - Processing audio...")
+                self.sse_callback("Rendering video - Processing audio...|82")
             elif 'Writing video' in message:
-                self.sse_callback("Rendering video - Processing frames...")
+                self.sse_callback("Rendering video - Processing frames...|85")
             elif 'Done' in message:
-                self.sse_callback("Rendering video - Finalizing...")
-            elif 'frame' in changes:
-                current_frame = changes.get('frame', 0)
-                total = changes.get('total', 100)
-                if total > 0:
-                    percent = (current_frame / total) * 100
-                    self.sse_callback(f"Rendering video - Processing frames ({percent:.0f}%)")
+                self.sse_callback("Rendering video - Finalizing...|90")
+            else:
+                # For other messages, just pass them through
+                self.sse_callback(message)
 
 def get_word_timestamps_from_google(audio_file_path):
     """Get word-level timestamps using Google Cloud Speech-to-Text"""
@@ -741,19 +753,23 @@ def cleanup_broll():
 
 def create_romanian_video(romanian_script, session_id, selected_music="funny 2.mp3", voice_id="gbLy9ep70G3JW53cTzFC", progress_callback=None, broll_files=None):
     """Modified to accept selected_music and voice_id parameters"""
-    user_dir, uploads_dir = create_user_directory(session_id)
-    
-    # Generate a unique video ID
-    video_id = str(uuid.uuid4())[:8]
-    
-    # Update all file paths to include session_id to ensure uniqueness
-    audio_path = os.path.join(user_dir, f"audio_file_{session_id}.mp3")
-    srt_path = os.path.join(user_dir, f"sub_file_{session_id}.srt")
-    output_path = os.path.join(user_dir, f"final_clip_file_{session_id}.mp4")
-    temp_audio_path = os.path.join(user_dir, f"TEMP_MPY_wvf_snd_{session_id}.mp3")
-    final_output = os.path.join(user_dir, f"final_video_{session_id}_{video_id}.mp4")
-
     try:
+        user_dir, uploads_dir = create_user_directory(session_id)
+        
+        # Generate a unique video ID
+        video_id = str(uuid.uuid4())[:8]
+        
+        # Update all file paths to include session_id to ensure uniqueness
+        audio_path = os.path.join(user_dir, f"audio_file_{session_id}.mp3")
+        srt_path = os.path.join(user_dir, f"sub_file_{session_id}.srt")
+        output_path = os.path.join(user_dir, f"final_clip_file_{session_id}.mp4")
+        temp_audio_path = os.path.join(user_dir, f"TEMP_MPY_wvf_snd_{session_id}.mp3")
+        final_output = os.path.join(user_dir, f"final_video_{session_id}_{video_id}.mp4")
+
+        # Initialize progress at 0%
+        if progress_callback:
+            progress_callback("Starting video creation...|0")
+
         # Retrieve your ElevenLabs API key from an environment variable
         ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
         if not ELEVENLABS_API_KEY:
@@ -775,10 +791,10 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
             voice_id=VOICE_ID,
             model_id="eleven_multilingual_v2",
             voice_settings={
-                "stability": 0.68,        # Range: 0-1. Higher value = more stable, lower = more variable
-                "similarity_boost": 0.85, # Range: 0-1. Higher value = closer to original voice
-                "style": 0.05,            # Range: 0-1. Higher value = more stylized
-                "use_speaker_boost": True # Enhances clarity and target speaker similarity
+                "stability": 0.68,
+                "similarity_boost": 0.85,
+                "style": 0.05,
+                "use_speaker_boost": True
             }
         )
         
@@ -787,6 +803,9 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
             for chunk in audio_stream:
                 if isinstance(chunk, bytes):
                     file.write(chunk)
+
+        if progress_callback:
+            progress_callback("Audio file generated successfully|20")
 
         # Retrieve your OpenAI API key from an environment variable
         OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -803,8 +822,14 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         # Get word-level timestamps from Google Cloud
         words_with_times = get_word_timestamps_from_google(audio_path)
         
+        if progress_callback:
+            progress_callback("Processing word timings...|35")
+        
         # Align the original script with the recognized words
         aligned_words = align_texts(romanian_script, words_with_times)
+        
+        if progress_callback:
+            progress_callback("Creating subtitle file...|40")
         
         # Create SRT file with aligned words
         srt_content = create_grouped_srt(aligned_words, max_words=4)
@@ -832,7 +857,11 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
 
         # Process each file
         processed_clips = []
-        for broll_path in broll_files:
+        total_files = len(broll_files)
+        for idx, broll_path in enumerate(broll_files, 1):
+            if progress_callback:
+                progress_callback(f"Processing b-roll {idx}/{total_files}...|{50 + (idx/total_files * 10)}")
+                
             file_ext = broll_path.lower().split('.')[-1]
             
             if file_ext in ['jpg', 'jpeg', 'png']:
@@ -866,6 +895,9 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
             
             processed_clips.append(clip)
 
+        if progress_callback:
+            progress_callback("Preparing final video sequence...|65")
+
         # Add a small buffer at the end of the video
         CLIP_DURATION = 5
         BUFFER_DURATION = 0.5  # seconds of buffer at the end
@@ -894,9 +926,15 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
             
             final_clips.append(clip)
 
+        if progress_callback:
+            progress_callback("Concatenating video clips...|70")
+
         # Concatenate all clips
         final_clip = concatenate_videoclips(final_clips)
         
+        if progress_callback:
+            progress_callback("Processing audio tracks...|75")
+            
         # Load the voice audio
         voice_audio = AudioFileClip(audio_path)
         
@@ -923,12 +961,30 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         # Create SSELogger instance with a proper callback
         def sse_callback(msg):
             if progress_callback:
-                progress_callback(msg)
+                if "Building video" in msg:
+                    progress_callback("Rendering video - Preparing...|80")
+                elif "Writing audio" in msg:
+                    progress_callback("Rendering video - Processing audio...|82")
+                elif "Writing video" in msg:
+                    progress_callback("Rendering video - Processing frames...|85")
+                elif "frame" in msg:
+                    # Extract frame number and total frames
+                    try:
+                        frame_info = msg.split("frame=")[1].split("/")[0].strip()
+                        total_frames = msg.split("frames=")[1].split()[0].strip()
+                        percent = (int(frame_info) / int(total_frames)) * 100
+                        progress_callback(f"Rendering video - Processing frames ({percent:.0f}%)|{85 + (percent * 0.05)}")
+                    except:
+                        progress_callback(msg)
+                elif "Done" in msg:
+                    progress_callback("Rendering video - Finalizing...|90")
+                else:
+                    progress_callback(msg)
                 
         sse_logger = SSELogger(sse_callback=sse_callback)
         
         if progress_callback:
-            progress_callback("Rendering video (it may take a while)...|60")
+            progress_callback("Rendering final video...|80")
         final_clip.write_videofile(
             output_path,
             fps=30,
@@ -950,6 +1006,8 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
             print("Adding styled subtitles...")
             ass_file = create_subtitle_clips(srt_path, (1080, 1920), user_dir)
             if ass_file and os.path.exists(ass_file):
+                if progress_callback:
+                    progress_callback("Rendering final video with subtitles...|95")
                 final_output = create_styled_subtitles(output_path, ass_file, user_dir, session_id)
                 
                 # Clean up temporary files only after successful creation
@@ -967,7 +1025,7 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
 
         # Let the user see the "download" button
         if progress_callback:
-            progress_callback("Video creation complete! |100")
+            progress_callback("Video creation complete!|100")
         print("Video creation complete!")
 
         # Clean up the clip resources before returning
