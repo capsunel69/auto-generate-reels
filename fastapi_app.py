@@ -198,12 +198,9 @@ def get_voices():
         {"id": "oToG20WieQJ7KUmhMkj4", "name": "Karen", "preview": "karen.mp3", "language": "romanian"},
         
         # English voices (using placeholder previews for now - replace with actual English voice previews)
-        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Rachel", "preview": "madalina.mp3", "language": "english"},
-        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Domi", "preview": "karen.mp3", "language": "english"},
-        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Bella", "preview": "madalina.mp3", "language": "english"},
-        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Antoni", "preview": "panfiliu.mp3", "language": "english"},
-        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Elli", "preview": "karen.mp3", "language": "english"},
-        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Josh", "preview": "panfiliu.mp3", "language": "english"}
+        {"id": "LgGXqiXAgeWadT5JmJWB", "name": "Adam Distrugatorul", "preview": "madalina.mp3", "language": "english"},
+        {"id": "EiNlNiXeDU1pqqOPrYMO", "name": "Narator Babuinator", "preview": "madalina.mp3", "language": "english"},
+        {"id": "xxHBkwyixiGK5rGxkJZu", "name": "Sculamentation Womăn", "preview": "madalina.mp3", "language": "english"},
     ]
     return {"voices": voices}
 
