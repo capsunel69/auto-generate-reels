@@ -190,7 +190,108 @@ def get_word_timestamps_from_google(audio_file_path, language="romanian"):
                 })
     
     print(f"Extracted {len(words_with_times)} words with timestamps")
+    
+    # Post-process to merge split contractions
+    words_with_times = merge_split_contractions(words_with_times)
+    
     return words_with_times
+
+def merge_split_contractions(words_with_times):
+    """
+    Merge split contractions like "you" + "re" → "you're"
+    This fixes issues where speech recognition splits contractions incorrectly
+    """
+    if not words_with_times:
+        return words_with_times
+    
+    # Common contraction patterns to merge
+    contraction_patterns = [
+        # Pattern: (first_word, second_word, merged_word)
+        ('you', 're', "you're"),
+        ('don', 't', "don't"),
+        ('can', 't', "can't"),
+        ('won', 't', "won't"),
+        ('it', 's', "it's"),
+        ('that', 's', "that's"),
+        ('he', 's', "he's"),
+        ('she', 's', "she's"),
+        ('we', 're', "we're"),
+        ('they', 're', "they're"),
+        ('i', 'm', "I'm"),
+        ('i', 'll', "I'll"),
+        ('you', 'll', "you'll"),
+        ('he', 'll', "he'll"),
+        ('she', 'll', "she'll"),
+        ('we', 'll', "we'll"),
+        ('they', 'll', "they'll"),
+        ('i', 've', "I've"),
+        ('you', 've', "you've"),
+        ('we', 've', "we've"),
+        ('they', 've', "they've"),
+        ('i', 'd', "I'd"),
+        ('you', 'd', "you'd"),
+        ('he', 'd', "he'd"),
+        ('she', 'd', "she'd"),
+        ('we', 'd', "we'd"),
+        ('they', 'd', "they'd"),
+        ('is', 'n\'t', "isn't"),
+        ('are', 'n\'t', "aren't"),
+        ('was', 'n\'t', "wasn't"),
+        ('were', 'n\'t', "weren't"),
+        ('have', 'n\'t', "haven't"),
+        ('has', 'n\'t', "hasn't"),
+        ('had', 'n\'t', "hadn't"),
+        ('will', 'not', "won't"),
+        ('would', 'not', "wouldn't"),
+        ('could', 'not', "couldn't"),
+        ('should', 'not', "shouldn't"),
+        ('must', 'not', "mustn't"),
+    ]
+    
+    merged_words = []
+    i = 0
+    
+    while i < len(words_with_times):
+        current_word = words_with_times[i]
+        
+        # Check if this word can be merged with the next one
+        merged = False
+        if i < len(words_with_times) - 1:
+            next_word = words_with_times[i + 1]
+            
+            # Normalize words for comparison (lowercase, remove punctuation)
+            current_normalized = current_word['word'].lower().strip('.,!?;:"()[]{}')
+            next_normalized = next_word['word'].lower().strip('.,!?;:"()[]{}')
+            
+            # Check against contraction patterns
+            for first, second, merged_form in contraction_patterns:
+                if current_normalized == first and next_normalized == second:
+                    # Calculate timing gap between words
+                    gap = next_word['start_time'] - current_word['end_time']
+                    
+                    # Only merge if the gap is small (less than 200ms)
+                    if gap < 0.2:
+                        # Create merged word
+                        merged_word = {
+                            'word': merged_form,
+                            'start_time': current_word['start_time'],
+                            'end_time': next_word['end_time'],
+                            'confidence': min(current_word.get('confidence', 1.0), 
+                                            next_word.get('confidence', 1.0))
+                        }
+                        merged_words.append(merged_word)
+                        merged = True
+                        i += 2  # Skip both words
+                        print(f"Merged contraction: '{current_word['word']}' + '{next_word['word']}' → '{merged_form}'")
+                        break
+        
+        if not merged:
+            # No merge, add current word as-is
+            merged_words.append(current_word)
+            i += 1
+    
+    print(f"Contraction merging: {len(words_with_times)} → {len(merged_words)} words")
+    return merged_words
 
 def create_grouped_srt(words_with_times, max_words=4):
     """Create SRT content with grouped words and improved timing"""
@@ -493,9 +594,8 @@ def format_timestamp_to_ass(seconds):
 def create_subtitle_clips(srt_file, videosize, user_dir):
     """
     Convert SRT to ASS with improved TikTok-style subtitles:
-    - Adaptive word grouping based on confidence and natural breaks
-    - Smoother timing with confidence-based adjustments
-    - Better highlighting with reduced timing buffers
+    - No word highlighting - just clean subtitle display
+    - Better punctuation handling - keep apostrophes, remove other punctuation
     - Improved synchronization for both Romanian and English
     """
     try:
@@ -527,21 +627,19 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-; Default style - for words not currently being spoken
+; Default style - clean white text without highlighting
 Style: Default,{font_name},64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,4,0,2,400,400,30,1
-; Highlighted style - for words currently being spoken
-Style: Highlight,{font_name},64,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,4,0,2,400,400,30,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-        # Function to clean word for display while preserving hyphens and apostrophes
+        # Function to clean word for display while preserving apostrophes and hyphens
         def clean_word_for_display(word):
             """
             Clean a word for subtitle display:
-            - Preserve hyphens and apostrophes within words
-            - Remove quotes, commas, periods and other punctuation
+            - Preserve apostrophes (') and hyphens (-) within words
+            - Remove other punctuation like ,.!?;:()[]{}
             - Convert to uppercase
             """
             import re
@@ -549,14 +647,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # Convert to uppercase
             word = word.upper()
             
-            # Remove quotes (including Romanian-style quotes)
-            word = re.sub(r'[„""\'"]', '', word)
+            # Remove quotes (but NOT apostrophes) - be more specific
+            # Remove Romanian quotes and regular quotes, but preserve apostrophes
+            word = re.sub(r'[„"""]', '', word)  # Removed \' from this regex
             
-            # Remove punctuation from start/end of word
+            # Remove specific punctuation from start/end of word, but keep apostrophes and hyphens
             word = word.strip(',.;:!?()[]{}')
             
-            # Keep only letters, numbers, hyphens and apostrophes
-            # This preserves Romanian diacritics and hyphens within words
+            # Keep only letters, numbers, apostrophes, and hyphens
+            # This preserves Romanian diacritics, apostrophes, and hyphens within words
             allowed_chars = r'\w\'\-șțăîâŞŢĂÎÂ'
             word = re.sub(f'[^{allowed_chars}]', '', word)
             
@@ -577,8 +676,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             print(f"Could not extract word-level timing: {e}")
             
         if words_with_times:
-            # Reduced timing buffer for better synchronization
-            TIMING_BUFFER = 0.05  # Reduced from 0.08 to 0.05 seconds (50ms)
+            # Minimal timing buffer for precise synchronization
+            TIMING_BUFFER = 0.02  # Reduced to 20ms for better precision
             
             # Adaptive grouping based on confidence and natural breaks
             def create_adaptive_groups(words):
@@ -594,25 +693,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     is_end_of_sentence = any(p in word['word'] for p in '.!?')
                     is_comma_pause = ',' in word['word']
                     
-                    # Detect pauses between words
+                    # Detect pauses between words - more strict detection
                     is_natural_pause = False
+                    pause_duration = 0
                     if i < len(words) - 1:
                         next_word = words[i + 1]
                         pause_duration = next_word['start_time'] - word['end_time']
-                        is_natural_pause = pause_duration > 0.25  # 250ms pause
+                        # More strict pause detection - only break on significant pauses
+                        is_natural_pause = pause_duration > 0.4  # Increased to 400ms for stricter detection
                     
                     # Determine group size based on confidence and word characteristics
-                    max_group_size = 4 if confidence > 0.8 and not is_estimated else 3
+                    max_group_size = 3 if confidence > 0.8 and not is_estimated else 2  # Smaller groups for better timing
                     
                     current_group.append(word)
                     
-                    # Create new group based on various criteria
+                    # Create new group based on various criteria - more conservative
                     should_break = (
                         len(current_group) >= max_group_size or
                         is_end_of_sentence or
                         is_natural_pause or
                         (is_comma_pause and len(current_group) >= 2) or
-                        (is_estimated and len(current_group) >= 2)  # Shorter groups for estimated words
+                        (is_estimated and len(current_group) >= 1)  # Break immediately for estimated words
                     )
                     
                     if should_break and current_group:
@@ -627,18 +728,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             
             word_groups = create_adaptive_groups(words_with_times)
             
-            # Reduced transition gap for smoother flow
-            GROUP_TRANSITION_GAP = 0.08  # Reduced from 0.15 to 0.08 seconds
+            # Minimal transition gap for precise timing
+            GROUP_TRANSITION_GAP = 0.05  # Reduced to 50ms for better precision
             
-            # Calculate and adjust group timings
+            # Calculate and adjust group timings with improved precision
             group_timings = []
             for group in word_groups:
-                group_start = group[0]['start_time'] - TIMING_BUFFER
+                # Use actual word timing without buffer for start time
+                group_start = group[0]['start_time']  # No buffer for more precise timing
                 group_end = group[-1]['end_time']
+                
+                # Calculate actual spoken duration
+                actual_duration = group_end - group_start
                 
                 # Adaptive minimum duration based on group size and confidence
                 avg_confidence = sum(w.get('confidence', 1.0) for w in group) / len(group)
-                min_duration = 0.4 if avg_confidence > 0.8 else 0.5  # Shorter for high confidence
+                
+                # More conservative minimum duration - only extend if really necessary
+                min_duration = max(0.3, actual_duration * 0.8)  # At least 80% of actual duration or 300ms
                 
                 if group_end - group_start < min_duration:
                     group_end = group_start + min_duration
@@ -646,28 +753,31 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 group_timings.append({
                     'start': group_start,
                     'end': group_end,
-                    'confidence': avg_confidence
+                    'confidence': avg_confidence,
+                    'actual_duration': actual_duration
                 })
             
-            # Smooth timing adjustments to prevent overlaps
+            # Improved timing adjustments to prevent overlaps while preserving natural pauses
             for i in range(1, len(group_timings)):
                 prev_timing = group_timings[i-1]
                 curr_timing = group_timings[i]
                 
-                # Adaptive gap based on confidence
-                gap = GROUP_TRANSITION_GAP
-                if prev_timing['confidence'] > 0.9 and curr_timing['confidence'] > 0.9:
-                    gap *= 0.7  # Smaller gap for high confidence groups
+                # Calculate the natural pause between groups
+                natural_pause = curr_timing['start'] - prev_timing['end']
                 
-                if curr_timing['start'] < prev_timing['end'] + gap:
-                    group_timings[i]['start'] = prev_timing['end'] + gap
+                # Only adjust if there's actually an overlap or very small gap
+                if natural_pause < GROUP_TRANSITION_GAP:
+                    # Adjust start time to create minimal gap
+                    group_timings[i]['start'] = prev_timing['end'] + GROUP_TRANSITION_GAP
                     
-                    # Maintain minimum duration
-                    min_duration = 0.4 if curr_timing['confidence'] > 0.8 else 0.5
-                    if group_timings[i]['end'] - group_timings[i]['start'] < min_duration:
-                        group_timings[i]['end'] = group_timings[i]['start'] + min_duration
+                    # Only extend end time if the actual duration would be too short
+                    new_duration = group_timings[i]['end'] - group_timings[i]['start']
+                    min_required = max(0.3, curr_timing['actual_duration'] * 0.8)
+                    
+                    if new_duration < min_required:
+                        group_timings[i]['end'] = group_timings[i]['start'] + min_required
             
-            # Process each word group with improved highlighting
+            # Process each word group - NO HIGHLIGHTING, just clean subtitles
             for group_idx, group in enumerate(word_groups):
                 group_start = group_timings[group_idx]['start']
                 group_end = group_timings[group_idx]['end']
@@ -693,76 +803,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 start_ass = format_timestamp_to_ass(group_start)
                 end_ass = format_timestamp_to_ass(group_end)
                 
-                # Base subtitle with improved styling
+                # Clean subtitle without any highlighting effects
                 dialogue_line = (
                     f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,"
                     f"{{\\pos({x_pos},{y_pos})"
                     f"\\fad({fade_in},{fade_out})"
-                    f"\\blur0.3"  # Reduced blur for sharper text
+                    f"\\blur0.3"
                     f"\\bord3"
-                    f"\\shad1.5"  # Reduced shadow for cleaner look
+                    f"\\shad1.5"
                     f"}}{text}\n"
                 )
                 
                 ass_content += dialogue_line
                 
-                # Individual word highlighting with improved timing
-                for i, current_word in enumerate(group):
-                    # More precise word timing
-                    word_start = max(0, current_word['start_time'] - (TIMING_BUFFER * 0.5))  # Reduced buffer for highlighting
-                    word_end = current_word['end_time']
-                    word_confidence = current_word.get('confidence', 1.0)
-                    
-                    # Ensure word timing stays within group bounds
-                    word_start = max(word_start, group_start)
-                    word_end = min(word_end, group_end)
-                    
-                    # Adaptive minimum word display time based on confidence
-                    min_word_duration = 0.12 if word_confidence > 0.8 else 0.15
-                    if word_end - word_start < min_word_duration:
-                        word_end = word_start + min_word_duration
-                    
-                    # Skip if invalid timing
-                    if word_end <= word_start:
-                        continue
-                    
-                    # Convert times to ASS format
-                    word_start_ass = format_timestamp_to_ass(word_start)
-                    word_end_ass = format_timestamp_to_ass(word_end)
-                    
-                    # Build highlighted text
-                    highlight_parts = []
-                    for j, word_info in enumerate(group):
-                        word = clean_word_for_display(word_info['word'])
-                        
-                        if j == i:
-                            # Current word - enhanced highlighting
-                            highlight_color = "&H00FFFF&" if word_confidence > 0.8 else "&H0080FF&"  # Different colors for confidence
-                            highlight_parts.append(f"{{\\c{highlight_color}\\bord4}}{word}{{\\c&HFFFFFF&\\bord3}}")
-                        else:
-                            highlight_parts.append(word)
-                    
-                    highlight_text = " ".join(highlight_parts)
-                    
-                    # Highlighting effect with smoother transitions
-                    highlight_line = (
-                        f"Dialogue: 1,{word_start_ass},{word_end_ass},Default,,0,0,0,,"
-                        f"{{\\pos({x_pos},{y_pos})"
-                        f"\\blur0.3"
-                        f"\\bord3"
-                        f"\\shad1.5"
-                        f"}}{highlight_text}\n"
-                    )
-                    
-                    ass_content += highlight_line
+                # NO HIGHLIGHTING CODE - removed all word-by-word highlighting
+                
         else:
             # Fallback to traditional subtitle display with improved timing
             subs = pysrt.open(srt_file)
             
-            # Reduced timing buffer for better sync
-            SUB_TIMING_BUFFER = 0.05  # Reduced from 0.1 to 0.05
+            # Minimal timing buffer for precise sync
+            SUB_TIMING_BUFFER = 0.02  # Reduced to 20ms for better precision
             
-            # Improved overlap prevention
+            # Improved overlap prevention with better timing logic
             for i in range(1, len(subs)):
                 prev_sub = subs[i-1]
                 curr_sub = subs[i]
@@ -770,25 +833,31 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 prev_end = prev_sub.end.to_time().total_seconds()
                 curr_start = curr_sub.start.to_time().total_seconds()
                 
-                # Smaller minimum gap for smoother flow
-                min_gap = 0.08  # Reduced from 0.15
-                if curr_start < prev_end + min_gap:
+                # Calculate natural pause between subtitles
+                natural_pause = curr_start - prev_end
+                
+                # Only adjust if there's an overlap or very small gap
+                min_gap = 0.05  # Reduced to 50ms for better precision
+                if natural_pause < min_gap:
                     new_start = prev_end + min_gap
                     curr_sub.start.from_seconds(new_start)
                     
                     curr_end = curr_sub.end.to_time().total_seconds()
-                    if curr_end - new_start < 0.4:  # Reduced minimum duration
-                        curr_sub.end.from_seconds(new_start + 0.4)
+                    # More conservative minimum duration
+                    min_duration = 0.3
+                    if curr_end - new_start < min_duration:
+                        curr_sub.end.from_seconds(new_start + min_duration)
             
             for sub in subs:
-                start_time_seconds = sub.start.to_time().total_seconds() - SUB_TIMING_BUFFER
-                start_time_seconds = max(0, start_time_seconds)
+                # Use precise timing without aggressive buffering
+                start_time_seconds = sub.start.to_time().total_seconds()
+                start_time_seconds = max(0, start_time_seconds)  # Don't go negative
                 end_time_seconds = sub.end.to_time().total_seconds()
                 
                 start_time = format_timestamp_to_ass(start_time_seconds)
                 end_time = format_timestamp_to_ass(end_time_seconds)
 
-                # Process text
+                # Process text with improved word cleaning
                 words = sub.text.split()
                 cleaned_words = [clean_word_for_display(word) for word in words]
                 text = " ".join(cleaned_words)
@@ -800,7 +869,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 current_length = 0
                 
                 for word in words:
-                    if current_length + len(word) > 18:  # Reduced from 20 to 18
+                    if current_length + len(word) > 18:
                         lines.append(' '.join(current_line))
                         current_line = [word]
                         current_length = len(word)
@@ -811,7 +880,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     lines.append(' '.join(current_line))
                 wrapped_text = '\\N'.join(lines)
 
-                # Enhanced styling
+                # Clean styling without highlighting
                 dialogue_line = (
                     f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,"
                     f"{{\\pos(540,1000)"
@@ -830,7 +899,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         with open(ass_file, "w", encoding="utf-8") as f:
             f.write(ass_content)
         
-        print(f"Created improved ASS file at: {ass_file}")
+        print(f"Created clean ASS file (no highlighting) at: {ass_file}")
         return ass_file
 
     except Exception as e:
