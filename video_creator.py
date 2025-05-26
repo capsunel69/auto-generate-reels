@@ -1043,8 +1043,8 @@ def clean_script_for_tts(script):
         'percent_removed': round((chars_removed / original_length * 100), 2) if original_length > 0 else 0
     }
 
-def create_romanian_video(romanian_script, session_id, selected_music="funny 2.mp3", voice_id="gbLy9ep70G3JW53cTzFC", progress_callback=None, broll_files=None):
-    """Modified to accept selected_music and voice_id parameters"""
+def create_video(script, session_id, language="romanian", selected_music="funny 2.mp3", voice_id="gbLy9ep70G3JW53cTzFC", progress_callback=None, broll_files=None):
+    """Create a video with the given script and selected resources. Supports multiple languages."""
     try:
         user_dir, uploads_dir = create_user_directory(session_id)
         
@@ -1078,7 +1078,7 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
             progress_callback("Generating audio file...|10")
             
         # Clean the script for TTS to improve audio quality
-        script_info = clean_script_for_tts(romanian_script)
+        script_info = clean_script_for_tts(script)
         tts_script = script_info['text']
         
         # Log cleaning results
@@ -1089,16 +1089,22 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         
         # Save both original and cleaned scripts for reference
         with open(os.path.join(user_dir, f"original_script_{session_id}.txt"), "w", encoding="utf-8") as f:
-            f.write(romanian_script)
+            f.write(script)
         with open(os.path.join(user_dir, f"cleaned_script_{session_id}.txt"), "w", encoding="utf-8") as f:
             f.write(tts_script)
             
+        # Select the appropriate model based on language
+        if language.lower() == "english":
+            model_id = "eleven_multilingual_v2"  # Works well for English
+        else:
+            model_id = "eleven_multilingual_v2"  # Works for Romanian and other languages
+            
         # Generate audio using ElevenLabs with voice parameters
-        print("Generating audio file...")
+        print(f"Generating audio file for {language} language...")
         audio_stream = client.text_to_speech.convert_as_stream(
             text=tts_script,
             voice_id=VOICE_ID,
-            model_id="eleven_multilingual_v2",
+            model_id=model_id,
             voice_settings={
                 "stability": 0.68,
                 "similarity_boost": 0.85,
@@ -1376,5 +1382,17 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         import gc
         gc.collect()
 
+def create_romanian_video(romanian_script, session_id, selected_music="funny 2.mp3", voice_id="gbLy9ep70G3JW53cTzFC", progress_callback=None, broll_files=None):
+    """Backward compatibility wrapper for create_video function"""
+    return create_video(
+        script=romanian_script,
+        session_id=session_id,
+        language="romanian",
+        selected_music=selected_music,
+        voice_id=voice_id,
+        progress_callback=progress_callback,
+        broll_files=broll_files
+    )
+
 if __name__ == "__main__":
-    create_romanian_video()
+    create_video()

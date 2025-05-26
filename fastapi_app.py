@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timedelta
 
 # Import from existing modules
-from video_creator import create_romanian_video, cleanup_broll, create_user_directory
+from video_creator import create_video, create_romanian_video, cleanup_broll, create_user_directory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -153,6 +153,7 @@ class VideoRequest(BaseModel):
     script: str
     music: str = "funny 2.mp3"
     voice: str = "gbLy9ep70G3JW53cTzFC"
+    language: str = "romanian"  # Default to Romanian for backward compatibility
     selected_brolls: List[str] = []
 
 class BrollInfo(BaseModel):
@@ -179,12 +180,30 @@ def get_music_list():
     music_files = [f.name for f in music_dir.glob('*.mp3')]
     return {"music_files": music_files}
 
+@app.get("/languages")
+def get_languages():
+    """Get available languages for script input"""
+    languages = [
+        {"code": "romanian", "name": "Romanian", "display": "Română"},
+        {"code": "english", "name": "English", "display": "English"}
+    ]
+    return {"languages": languages}
+
 @app.get("/voices")
 def get_voices():
     voices = [
-        {"id": "gbLy9ep70G3JW53cTzFC", "name": "Madalina", "preview": "madalina.mp3"},
-        {"id": "8QdBGRwn9G5tpGGTOaOe", "name": "Panfiliu", "preview": "panfiliu.mp3"},
-        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Karen", "preview": "karen.mp3"}
+        # Romanian voices
+        {"id": "gbLy9ep70G3JW53cTzFC", "name": "Madalina", "preview": "madalina.mp3", "language": "romanian"},
+        {"id": "8QdBGRwn9G5tpGGTOaOe", "name": "Panfiliu", "preview": "panfiliu.mp3", "language": "romanian"},
+        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Karen", "preview": "karen.mp3", "language": "romanian"},
+        
+        # English voices (using placeholder previews for now - replace with actual English voice previews)
+        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Rachel", "preview": "madalina.mp3", "language": "english"},
+        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Domi", "preview": "karen.mp3", "language": "english"},
+        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Bella", "preview": "madalina.mp3", "language": "english"},
+        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Antoni", "preview": "panfiliu.mp3", "language": "english"},
+        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Elli", "preview": "karen.mp3", "language": "english"},
+        {"id": "oToG20WieQJ7KUmhMkj4", "name": "Josh", "preview": "panfiliu.mp3", "language": "english"}
     ]
     return {"voices": voices}
 
@@ -448,9 +467,10 @@ async def create_video_endpoint(request: VideoRequest, user_id: str = Depends(ge
                 # Start video creation in a background task
                 video_task = asyncio.create_task(
                     asyncio.to_thread(
-                        create_romanian_video,
-                        romanian_script=request.script,
+                        create_video,
+                        script=request.script,
                         session_id=session_id,
+                        language=request.language,
                         selected_music=request.music,
                         voice_id=request.voice,
                         progress_callback=progress_callback,
