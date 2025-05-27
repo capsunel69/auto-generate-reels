@@ -198,9 +198,9 @@ def get_voices():
         {"id": "oToG20WieQJ7KUmhMkj4", "name": "Karen", "preview": "karen.mp3", "language": "romanian"},
         
         # English voices (using placeholder previews for now - replace with actual English voice previews)
-        {"id": "LgGXqiXAgeWadT5JmJWB", "name": "Adam Distrugatorul", "preview": "madalina.mp3", "language": "english"},
-        {"id": "EiNlNiXeDU1pqqOPrYMO", "name": "Narator Babuinator", "preview": "madalina.mp3", "language": "english"},
-        {"id": "xxHBkwyixiGK5rGxkJZu", "name": "Sculamentation Womăn", "preview": "madalina.mp3", "language": "english"},
+        {"id": "LgGXqiXAgeWadT5JmJWB", "name": "Adam Distrugatorul", "preview": "adam.mp3", "language": "english"},
+        {"id": "EiNlNiXeDU1pqqOPrYMO", "name": "Narator Babuinator", "preview": "narator.mp3", "language": "english"},
+        {"id": "xxHBkwyixiGK5rGxkJZu", "name": "Sculamentation Womăn", "preview": "sculamentation.mp3", "language": "english"},
     ]
     return {"voices": voices}
 
