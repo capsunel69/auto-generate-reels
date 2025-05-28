@@ -1378,6 +1378,9 @@ def create_video(script, session_id, language="romanian", selected_music="funny 
         # Load the voice audio
         voice_audio = AudioFileClip(audio_path)
         
+        # Boost voice volume for better clarity and prominence
+        voice_audio = voice_audio.with_effects([MultiplyVolume(1.4)])  # 150% of original volume
+        
         # Load and prepare background music using selected music
         bg_music = AudioFileClip(f"music/{selected_music}")
         
@@ -1390,7 +1393,7 @@ def create_video(script, session_id, language="romanian", selected_music="funny 
         bg_music = bg_music.with_duration(voice_audio.duration + BUFFER_DURATION)
         
         # Lower the volume of background music using MultiplyVolume
-        bg_music = bg_music.with_effects([MultiplyVolume(0.15)])  # 15% of original volume
+        bg_music = bg_music.with_effects([MultiplyVolume(0.15)])  # Reduced to 8% to give more space for boosted voice
         
         # Combine voice and background music
         final_audio = CompositeAudioClip([voice_audio, bg_music])

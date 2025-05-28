@@ -201,6 +201,8 @@ def get_voices():
         {"id": "LgGXqiXAgeWadT5JmJWB", "name": "Adam Distrugatorul", "preview": "adam.mp3", "language": "english"},
         {"id": "EiNlNiXeDU1pqqOPrYMO", "name": "Narator Babuinator", "preview": "narator.mp3", "language": "english"},
         {"id": "xxHBkwyixiGK5rGxkJZu", "name": "Sculamentation Womăn", "preview": "sculamentation.mp3", "language": "english"},
+        {"id": "Atp5cNFg1Wj5gyKD7HWV", "name": "Natasha Cumpanasa", "preview": "sculamentation.mp3", "language": "english"},
+        {"id": "XhNlP8uwiH6XZSFnH1yL", "name": "Elizabeth", "preview": "sculamentation.mp3", "language": "english"}
     ]
     return {"voices": voices}
 
