@@ -701,7 +701,7 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 
 ; Single style for fluid subtitles
-Style: Main,{font_name},68,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,4,2,2,90,90,50,1
+Style: Main,{font_name},68,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,3,1,2,90,90,200,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -830,9 +830,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         def create_single_track_subtitles(timeline):
             """
-            Create a single continuous subtitle track with smooth word highlighting.
+            Create a single continuous subtitle track with smooth word highlighting and line wrapping.
             """
             subtitle_events = []
+            
+            # Constants for subtitle positioning and formatting
+            center_x = 540  # Center of 1080p width
+            center_y = 1400  # Moved lower from 960 (middle) to 1400
+            max_line_width = 800  # Maximum width in pixels before wrapping
+            line_spacing = 80   # Vertical spacing between lines
             
             for group_idx, group in enumerate(timeline):
                 words = group['words']
@@ -883,21 +889,55 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         if event['end'] > current_time:
                             next_change = min(next_change, event['end'])
                     
-                    # Create subtitle text for this time segment
-                    subtitle_text = ""
+                    # Split words into lines based on estimated width
+                    lines = []
+                    current_line = []
+                    current_line_width = 0
+                    
                     for word_idx, word_data in enumerate(words):
                         word = word_data['word']
+                        # Estimate word width (rough approximation)
+                        word_width = len(word) * 30  # Assume average character width of 30 pixels
                         
-                        if word_idx == active_word_idx:
-                            # Highlighted word (larger and colored)
-                            subtitle_text += f"{{\\c{active_color}\\fscx110\\fscy110}}{word}"
-                        else:
-                            # Normal word (gray and normal size)
-                            subtitle_text += f"{{\\c&HCCCCCC&\\fscx100\\fscy100}}{word}"
+                        # Add spacing between words
+                        if current_line:
+                            word_width += 20  # Space between words
                         
-                        # Add space between words (except last word)
-                        if word_idx < len(words) - 1:
-                            subtitle_text += " "
+                        # Check if adding this word would exceed max width
+                        if current_line and current_line_width + word_width > max_line_width:
+                            # Start new line
+                            lines.append(current_line)
+                            current_line = []
+                            current_line_width = 0
+                        
+                        current_line.append((word_idx, word))
+                        current_line_width += word_width
+                    
+                    # Add remaining line if any
+                    if current_line:
+                        lines.append(current_line)
+                    
+                    # Create subtitle text with line breaks
+                    subtitle_text = ""
+                    for line_idx, line in enumerate(lines):
+                        if line_idx > 0:
+                            subtitle_text += "\\N"  # ASS line break
+                        
+                        # Add vertical positioning for each line
+                        y_pos = center_y + (line_idx - (len(lines)-1)/2) * line_spacing
+                        subtitle_text += f"{{\\pos({center_x},{y_pos})}}"
+                        
+                        for word_idx, word in line:
+                            if word_idx == active_word_idx:
+                                # Highlighted word (larger and colored)
+                                subtitle_text += f"{{\\c{active_color}\\fscx110\\fscy110}}{word}"
+                            else:
+                                # Normal word (gray and normal size)
+                                subtitle_text += f"{{\\c&HCCCCCC&\\fscx100\\fscy100}}{word}"
+                            
+                            # Add space between words (except last word in line)
+                            if word_idx < line[-1][0]:
+                                subtitle_text += " "
                     
                     # Add subtitle event
                     if next_change > current_time:
@@ -936,7 +976,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             
             # Center positioning
             center_x = 540
-            center_y = 960
+            center_y = 1400
             
             # Generate ASS dialogue lines
             for event in subtitle_events:
@@ -983,7 +1023,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             print(f"Created {len(subtitle_events)} fluid subtitle events from SRT")
             
             center_x = 540
-            center_y = 960
+            center_y = 1400
             
             for event in subtitle_events:
                 dialogue = (
