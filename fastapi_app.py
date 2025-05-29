@@ -196,6 +196,7 @@ def get_voices():
         {"id": "gbLy9ep70G3JW53cTzFC", "name": "Madalina", "preview": "madalina.mp3", "language": "romanian"},
         {"id": "8QdBGRwn9G5tpGGTOaOe", "name": "Panfiliu", "preview": "panfiliu.mp3", "language": "romanian"},
         {"id": "oToG20WieQJ7KUmhMkj4", "name": "Karen", "preview": "karen.mp3", "language": "romanian"},
+        {"id": "SXJapgMSAyIX0L4RMtRR", "name": "Alinutza", "preview": "madalina.mp3", "language": "romanian"},
         
         # English voices (using placeholder previews for now - replace with actual English voice previews)
         {"id": "LgGXqiXAgeWadT5JmJWB", "name": "Adam Distrugatorul", "preview": "adam.mp3", "language": "english"},

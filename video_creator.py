@@ -198,7 +198,7 @@ def get_word_timestamps_from_google(audio_file_path, language="romanian"):
 
 def merge_split_contractions(words_with_times):
     """
-    Merge split contractions like "you" + "re" → "you're"
+    Merge split contractions including Romanian patterns like "să" + "i" → "să-i"
     This fixes issues where speech recognition splits contractions incorrectly
     """
     if not words_with_times:
@@ -206,7 +206,7 @@ def merge_split_contractions(words_with_times):
     
     # Common contraction patterns to merge
     contraction_patterns = [
-        # Pattern: (first_word, second_word, merged_word)
+        # English contractions
         ('you', 're', "you're"),
         ('don', 't', "don't"),
         ('can', 't', "can't"),
@@ -246,6 +246,50 @@ def merge_split_contractions(words_with_times):
         ('could', 'not', "couldn't"),
         ('should', 'not', "shouldn't"),
         ('must', 'not', "mustn't"),
+        
+        # Romanian contractions - common patterns
+        ('să', 'i', "să-i"),
+        ('să', 'și', "să-și"),
+        ('să', 'mi', "să-mi"),
+        ('să', 'ți', "să-ți"),
+        ('să', 'ne', "să-ne"),
+        ('să', 'vă', "să-vă"),
+        ('să', 'le', "să-le"),
+        ('s', 'a', "s-a"),
+        ('m', 'a', "m-a"),
+        ('l', 'a', "l-a"),
+        ('i', 'a', "i-a"),
+        ('ne', 'a', "ne-a"),
+        ('v', 'a', "v-a"),
+        ('le', 'a', "le-a"),
+        ('nu', 'i', "nu-i"),
+        ('nu', 'mi', "nu-mi"),
+        ('nu', 'ți', "nu-ți"),
+        ('nu', 'și', "nu-și"),
+        ('de', 'a', "de-a"),
+        ('de', 'i', "de-i"),
+        ('pe', 'a', "pe-a"),
+        ('cu', 'a', "cu-a"),
+        ('la', 'a', "la-a"),
+        ('în', 'a', "în-a"),
+        ('pentru', 'a', "pentru-a"),
+        ('fără', 'a', "fără-a"),
+        ('după', 'a', "după-a"),
+        ('înainte', 'de', "înainte-de"),
+        ('în', 'loc', "în-loc"),
+        ('de', 'asemenea', "de-asemenea"),
+        
+        # Common Romanian verb contractions
+        ('a', 'se', "a-se"),
+        ('va', 'fi', "va-fi"),
+        ('ar', 'fi', "ar-fi"),
+        ('o', 'să', "o-să"),
+        ('ai', 'să', "ai-să"),
+        ('are', 'să', "are-să"),
+        ('au', 'să', "au-să"),
+        ('începu', 'să', "începu-să"),
+        ('început', 'să', "început-să"),
+        ('trebuie', 'să', "trebuie-să"),
     ]
     
     merged_words = []
@@ -269,8 +313,9 @@ def merge_split_contractions(words_with_times):
                     # Calculate timing gap between words
                     gap = next_word['start_time'] - current_word['end_time']
                     
-                    # Only merge if the gap is small (less than 200ms)
-                    if gap < 0.2:
+                    # Only merge if the gap is small (less than 300ms for Romanian)
+                    max_gap = 0.3 if any(char in merged_form for char in 'șțăîâ') else 0.2
+                    if gap < max_gap:
                         # Create merged word
                         merged_word = {
                             'word': merged_form,
@@ -606,19 +651,20 @@ def format_timestamp_to_ass(seconds):
 
 def create_subtitle_clips(srt_file, videosize, user_dir):
     """
-    Create clean, professional subtitles with perfect timing and no overlaps.
+    Create fluid continuous karaoke-style subtitles with no overlapping or flickering.
     Features:
-    - Guaranteed no time-based overlaps
-    - Clean visual presentation
-    - Proper word grouping (2-4 words per subtitle)
-    - Smooth transitions between subtitles
-    - Professional styling
+    - Single subtitle on screen at any time
+    - Smooth word highlighting transitions
+    - No gaps or flickering between words
+    - Random highlight colors from specified palette
+    - Continuous flow without interruption
     """
     try:
         import pysrt
         import os
         import re
         import json
+        import random
         
         # Get the absolute path to the font file
         font_path = os.path.abspath(os.path.join('src', 'fonts', 'Montserrat-Black.ttf'))
@@ -635,9 +681,9 @@ def create_subtitle_clips(srt_file, videosize, user_dir):
         # Create ASS file in user directory
         ass_file = os.path.join(user_dir, "subtitles.ass")
         
-        # Clean ASS content with professional styling
+        # Clean ASS content with single track styling
         ass_content = f"""[Script Info]
-Title: Clean Professional Subtitles
+Title: Fluid Karaoke Subtitles
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -647,15 +693,19 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 
-; Main subtitle style - clean and readable
-Style: Main,{font_name},72,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,3,1,2,60,60,40,1
-
-; Emphasis style for important words
-Style: Emphasis,{font_name},78,&H0000FFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,105,105,3,0,1,4,2,2,60,60,40,1
+; Single style for fluid subtitles
+Style: Main,{font_name},68,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,4,2,2,90,90,50,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+        # Color palette for highlighted words (BGR format for ASS)
+        highlight_colors = [
+            "&H002AF82B&",  # Green (2BF82A)
+            "&H0014FAFD&",  # Yellow (FDFA14) 
+            "&H001619F0&"   # Red (F01916)
+        ]
 
         def clean_word_for_display(word):
             """Clean word for subtitle display"""
@@ -670,89 +720,192 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # Convert to uppercase for better visibility
             return word.strip().upper()
 
-        def is_emphasis_word(word):
-            """Determine if a word should be emphasized"""
-            emphasis_patterns = [
-                r'\b(FOARTE|SUPER|INCREDIBIL|AMAZING|WOW|FANTASTIC|PERFECT|UIMITOR)\b',
-                r'\b(NU|NOT|NEVER|NIMIC|NIMENI|DELOC)\b',
-                r'\b(DA|YES|EXACT|SIGUR|PERFECT|ABSOLUT)\b',
-                r'\b\d+\b',  # Numbers
-                r'\b[A-Z]{3,}\b',  # All caps words
-                r'\b(ACUM|NOW|IMEDIAT|URGENT)\b'
-            ]
-            
-            for pattern in emphasis_patterns:
-                if re.search(pattern, word.upper()):
-                    return True
-            return False
-
-        def create_subtitle_groups(words_with_times, max_words_per_group=3):
+        def create_fluid_timeline(words_with_times, max_words_per_group=3):
             """
-            Create subtitle groups with perfect timing and no overlaps.
-            Each group contains 2-3 words and has clean timing boundaries.
+            Create a fluid timeline with continuous subtitle groups and smooth transitions.
             """
             if not words_with_times:
                 return []
             
-            groups = []
+            timeline = []
             current_group = []
             
-            # Minimum subtitle duration and gap between subtitles
-            MIN_SUBTITLE_DURATION = 0.8  # seconds
-            SUBTITLE_GAP = 0.1  # seconds between subtitles
+            # Romanian contraction patterns
+            romanian_contractions = [
+                ('să', 'i'), ('să', 'și'), ('să', 'mi'), ('să', 'ți'), 
+                ('s', 'a'), ('m', 'a'), ('l', 'a'), ('i', 'a'),
+                ('nu', 'i'), ('nu', 'mi'), ('nu', 'ți'),
+                ('de', 'a'), ('de', 'i'), ('pe', 'a'),
+                ('cu', 'a'), ('la', 'a'), ('în', 'a')
+            ]
             
-            for i, word_info in enumerate(words_with_times):
+            def should_merge_romanian_words(word1, word2):
+                w1_clean = word1.lower().strip('.,!?;:"()[]{}')
+                w2_clean = word2.lower().strip('.,!?;:"()[]{}')
+                for first, second in romanian_contractions:
+                    if w1_clean == first and w2_clean == second:
+                        return True
+                return False
+            
+            def has_sentence_end(word):
+                return any(p in word for p in '.!?')
+            
+            def is_long_pause(current_end, next_start, threshold=1.2):
+                return next_start - current_end > threshold
+            
+            # Process words and create groups
+            i = 0
+            while i < len(words_with_times):
+                word_info = words_with_times[i]
                 word = clean_word_for_display(word_info['word'])
-                if not word:  # Skip empty words
+                
+                if not word:
+                    i += 1
                     continue
                 
-                current_group.append(word_info)
+                # Handle Romanian contractions
+                if (i < len(words_with_times) - 1 and 
+                    should_merge_romanian_words(word_info['word'], words_with_times[i + 1]['word']) and
+                    words_with_times[i + 1]['start_time'] - word_info['end_time'] < 0.3):
+                    
+                    next_word_info = words_with_times[i + 1]
+                    next_word = clean_word_for_display(next_word_info['word'])
+                    
+                    merged_word = {
+                        'word': f"{word}-{next_word}",
+                        'start_time': word_info['start_time'],
+                        'end_time': next_word_info['end_time'],
+                        'color': random.choice(highlight_colors)
+                    }
+                    current_group.append(merged_word)
+                    i += 2
+                    print(f"Merged: '{word}' + '{next_word}' → '{word}-{next_word}'")
+                else:
+                    current_group.append({
+                        'word': word,
+                        'start_time': word_info['start_time'],
+                        'end_time': word_info['end_time'],
+                        'color': random.choice(highlight_colors)
+                    })
+                    i += 1
                 
-                # Determine when to end current group
+                # Decide when to end group
+                next_has_long_pause = False
+                if i < len(words_with_times):
+                    next_has_long_pause = is_long_pause(current_group[-1]['end_time'], words_with_times[i]['start_time'])
+                
                 should_end_group = (
-                    len(current_group) >= max_words_per_group or  # Max words reached
-                    i == len(words_with_times) - 1 or  # Last word
-                    any(p in word for p in '.!?') or  # Punctuation indicates end
-                    (i < len(words_with_times) - 1 and 
-                     words_with_times[i + 1]['start_time'] - word_info['end_time'] > 0.5)  # Long pause
+                    len(current_group) >= max_words_per_group or
+                    i >= len(words_with_times) or
+                    has_sentence_end(word_info['word']) or
+                    next_has_long_pause
                 )
                 
                 if should_end_group and current_group:
-                    # Calculate group timing
                     group_start = current_group[0]['start_time']
                     group_end = current_group[-1]['end_time']
                     
-                    # Ensure minimum duration
-                    if group_end - group_start < MIN_SUBTITLE_DURATION:
-                        group_end = group_start + MIN_SUBTITLE_DURATION
+                    # Extend group to next group start for continuity (unless long pause)
+                    if i < len(words_with_times) and not next_has_long_pause:
+                        next_start = words_with_times[i]['start_time']
+                        group_end = next_start  # Extend exactly to next group
                     
-                    # Check for overlap with next group and adjust if needed
-                    if i < len(words_with_times) - 1:
-                        next_word_start = words_with_times[i + 1]['start_time']
-                        if group_end + SUBTITLE_GAP > next_word_start:
-                            group_end = next_word_start - SUBTITLE_GAP
-                            # Ensure we don't make it too short
-                            if group_end - group_start < 0.5:
-                                group_end = group_start + 0.5
-                    
-                    # Create group text
-                    group_text = ' '.join(clean_word_for_display(w['word']) for w in current_group)
-                    group_text = group_text.strip()
-                    
-                    if group_text:  # Only add non-empty groups
-                        # Check if any word in group should be emphasized
-                        has_emphasis = any(is_emphasis_word(w['word']) for w in current_group)
-                        
-                        groups.append({
-                            'text': group_text,
-                            'start_time': group_start,
-                            'end_time': group_end,
-                            'has_emphasis': has_emphasis
-                        })
+                    timeline.append({
+                        'words': current_group.copy(),
+                        'start_time': group_start,
+                        'end_time': group_end,
+                        'has_pause_after': next_has_long_pause
+                    })
                     
                     current_group = []
             
-            return groups
+            return timeline
+
+        def create_single_track_subtitles(timeline):
+            """
+            Create a single continuous subtitle track with smooth word highlighting.
+            """
+            subtitle_events = []
+            
+            for group_idx, group in enumerate(timeline):
+                words = group['words']
+                group_start = group['start_time']
+                group_end = group['end_time']
+                
+                # Create timeline for this group
+                word_events = []
+                for word_idx, word_data in enumerate(words):
+                    word_start = word_data['start_time']
+                    word_end = word_data['end_time']
+                    
+                    # Ensure word doesn't extend beyond group
+                    word_end = min(word_end, group_end)
+                    
+                    # Ensure minimum word duration
+                    if word_end - word_start < 0.3:
+                        word_end = word_start + 0.3
+                        if word_end > group_end:
+                            word_end = group_end
+                    
+                    word_events.append({
+                        'word_idx': word_idx,
+                        'start': word_start,
+                        'end': word_end,
+                        'color': word_data['color']
+                    })
+                
+                # Create subtitle segments for this group
+                current_time = group_start
+                
+                while current_time < group_end:
+                    # Find which word is active at current_time
+                    active_word_idx = -1
+                    active_color = highlight_colors[0]  # Default color
+                    
+                    for event in word_events:
+                        if event['start'] <= current_time < event['end']:
+                            active_word_idx = event['word_idx']
+                            active_color = event['color']
+                            break
+                    
+                    # Find next timing change
+                    next_change = group_end
+                    for event in word_events:
+                        if event['start'] > current_time:
+                            next_change = min(next_change, event['start'])
+                        if event['end'] > current_time:
+                            next_change = min(next_change, event['end'])
+                    
+                    # Create subtitle text for this time segment
+                    subtitle_text = ""
+                    for word_idx, word_data in enumerate(words):
+                        word = word_data['word']
+                        
+                        if word_idx == active_word_idx:
+                            # Highlighted word (larger and colored)
+                            subtitle_text += f"{{\\c{active_color}\\fscx110\\fscy110}}{word}"
+                        else:
+                            # Normal word (gray and normal size)
+                            subtitle_text += f"{{\\c&HCCCCCC&\\fscx100\\fscy100}}{word}"
+                        
+                        # Add space between words (except last word)
+                        if word_idx < len(words) - 1:
+                            subtitle_text += " "
+                    
+                    # Add subtitle event
+                    if next_change > current_time:
+                        start_ass = format_timestamp_to_ass(current_time)
+                        end_ass = format_timestamp_to_ass(next_change)
+                        
+                        subtitle_events.append({
+                            'start': start_ass,
+                            'end': end_ass,
+                            'text': subtitle_text
+                        })
+                    
+                    current_time = next_change
+            
+            return subtitle_events
 
         # Load word timing data
         words_with_times = []
@@ -766,158 +919,70 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             print(f"Could not load word timing data: {e}")
 
         if words_with_times:
-            # Process words one at a time with MINIMAL timing adjustments
-            processed_words = []
+            # Create fluid timeline
+            timeline = create_fluid_timeline(words_with_times, max_words_per_group=3)
             
-            for i, word_info in enumerate(words_with_times):
-                word = clean_word_for_display(word_info['word'])
-                if not word:  # Skip empty words
-                    continue
-                    
-                # Use ORIGINAL timing from Google Speech-to-Text - it's usually very accurate
-                word_start = word_info['start_time']
-                word_end = word_info['end_time']
-                
-                # Only adjust if the duration is extremely short (less than 100ms)
-                if word_end - word_start < 0.1:
-                    word_end = word_start + 0.15  # Very minimal adjustment
-                
-                processed_words.append({
-                    'word': word,
-                    'start_time': word_start,
-                    'end_time': word_end,
-                    'has_emphasis': is_emphasis_word(word)
-                })
+            # Generate single track subtitles
+            subtitle_events = create_single_track_subtitles(timeline)
             
-            # Ensure seamless word transitions with NO GAPS
-            for i in range(1, len(processed_words)):
-                prev_word = processed_words[i-1]
-                curr_word = processed_words[i]
-                
-                # Calculate the gap between words
-                gap = curr_word['start_time'] - prev_word['end_time']
-                
-                if gap > 0.1:  # If there's a significant gap (>100ms)
-                    # Extend previous word to fill most of the gap, leaving just 50ms for clean transition
-                    prev_word['end_time'] = curr_word['start_time'] - 0.05
-                elif gap < 0:  # If there's an overlap
-                    # Shorten previous word to end just before current word starts
-                    if prev_word['end_time'] - prev_word['start_time'] > 0.1:
-                        prev_word['end_time'] = curr_word['start_time'] - 0.01
-                    else:
-                        # If previous word would be too short, delay current word slightly
-                        curr_word['start_time'] = prev_word['end_time'] + 0.01
+            print(f"Created {len(subtitle_events)} fluid subtitle events from {len(timeline)} groups")
             
-            print(f"Created {len(processed_words)} individual word subtitles")
+            # Center positioning
+            center_x = 540
+            center_y = 960
             
-            # Debug: Print timing for first few words to verify synchronization
-            print("First 10 words timing:")
-            for i, word_data in enumerate(processed_words[:10]):
-                print(f"  {i+1}. '{word_data['word']}': {word_data['start_time']:.3f}s - {word_data['end_time']:.3f}s ({word_data['end_time'] - word_data['start_time']:.3f}s duration)")
-            
-            # Generate ASS dialogue lines for individual words
-            for word_data in processed_words:
-                start_ass = format_timestamp_to_ass(word_data['start_time'])
-                end_ass = format_timestamp_to_ass(word_data['end_time'])
-                
-                # Choose style
-                style = "Emphasis" if word_data['has_emphasis'] else "Main"
-                
-                # Center positioning
-                center_x = 540
-                center_y = 1200
-                
-                # Create subtitle with pop animation
-                duration_ms = int((word_data['end_time'] - word_data['start_time']) * 1000)
-                
+            # Generate ASS dialogue lines
+            for event in subtitle_events:
                 dialogue = (
-                    f"Dialogue: 0,{start_ass},{end_ass},{style},,0,0,0,,"
-                    f"{{\\pos({center_x},{center_y})"
-                    f"\\alpha&H00&\\fscx80\\fscy80"  # Start slightly smaller and fully visible
-                    f"\\t(0,100,\\fscx120\\fscy120)"  # Pop to larger size quickly
-                    f"\\t(100,200,\\fscx100\\fscy100)"  # Settle to normal size
-                    f"\\t({max(duration_ms - 100, duration_ms * 0.9)},{duration_ms},\\alpha&HFF&)"  # Quick fade out at the very end
-                    f"}}{word_data['word']}\n"
+                    f"Dialogue: 0,{event['start']},{event['end']},Main,,0,0,0,,"
+                    f"{{\\pos({center_x},{center_y})\\an2}}"
+                    f"{event['text']}\n"
                 )
                 ass_content += dialogue
 
         else:
-            # Fallback to SRT processing - one word at a time
+            # Fallback to SRT processing
             print("Falling back to SRT processing...")
             subs = pysrt.open(srt_file)
             
-            # Process SRT subtitles word by word
-            processed_words = []
-            
+            # Convert SRT to word timeline
+            all_words = []
             for sub in subs:
                 start_time = sub.start.to_time().total_seconds()
                 end_time = sub.end.to_time().total_seconds()
                 duration = end_time - start_time
                 text = sub.text.strip()
                 
-                # Split into individual words
                 words = text.split()
                 cleaned_words = [clean_word_for_display(word) for word in words if clean_word_for_display(word)]
                 
                 if cleaned_words:
-                    # Calculate timing for each word
-                    word_duration = duration / len(cleaned_words)
+                    word_duration = max(duration / len(cleaned_words), 0.4)
                     
                     for word_idx, word in enumerate(cleaned_words):
                         word_start = start_time + (word_idx * word_duration)
                         word_end = word_start + word_duration
                         
-                        # Ensure minimum duration for single words
-                        if word_end - word_start < 0.25:
-                            word_end = word_start + 0.25
-                        
-                        processed_words.append({
+                        all_words.append({
                             'word': word,
                             'start_time': word_start,
-                            'end_time': word_end,
-                            'has_emphasis': is_emphasis_word(word)
+                            'end_time': word_end
                         })
             
-            # Ensure seamless word transitions with NO GAPS (SRT fallback)
-            for i in range(1, len(processed_words)):
-                prev_word = processed_words[i-1]
-                curr_word = processed_words[i]
-                
-                # Calculate the gap between words
-                gap = curr_word['start_time'] - prev_word['end_time']
-                
-                if gap > 0.1:  # If there's a significant gap (>100ms)
-                    # Extend previous word to fill most of the gap
-                    prev_word['end_time'] = curr_word['start_time'] - 0.05
-                elif gap < 0:  # If there's an overlap
-                    # Shorten previous word or delay current word
-                    if prev_word['end_time'] - prev_word['start_time'] > 0.1:
-                        prev_word['end_time'] = curr_word['start_time'] - 0.01
-                    else:
-                        curr_word['start_time'] = prev_word['end_time'] + 0.01
+            # Process SRT words through same pipeline
+            timeline = create_fluid_timeline(all_words, max_words_per_group=3)
+            subtitle_events = create_single_track_subtitles(timeline)
             
-            print(f"Created {len(processed_words)} individual word subtitles from SRT")
+            print(f"Created {len(subtitle_events)} fluid subtitle events from SRT")
             
-            # Generate ASS dialogue lines for SRT fallback
-            for word_data in processed_words:
-                start_ass = format_timestamp_to_ass(word_data['start_time'])
-                end_ass = format_timestamp_to_ass(word_data['end_time'])
-                
-                style = "Emphasis" if word_data['has_emphasis'] else "Main"
-                center_x = 540
-                center_y = 1200
-                
-                # Create subtitle with pop animation
-                duration_ms = int((word_data['end_time'] - word_data['start_time']) * 1000)
-                
+            center_x = 540
+            center_y = 960
+            
+            for event in subtitle_events:
                 dialogue = (
-                    f"Dialogue: 0,{start_ass},{end_ass},{style},,0,0,0,,"
-                    f"{{\\pos({center_x},{center_y})"
-                    f"\\alpha&H00&\\fscx80\\fscy80"  # Start slightly smaller and fully visible
-                    f"\\t(0,100,\\fscx120\\fscy120)"  # Pop to larger size quickly
-                    f"\\t(100,200,\\fscx100\\fscy100)"  # Settle to normal size
-                    f"\\t({max(duration_ms - 100, duration_ms * 0.9)},{duration_ms},\\alpha&HFF&)"  # Quick fade out at the very end
-                    f"}}{word_data['word']}\n"
+                    f"Dialogue: 0,{event['start']},{event['end']},Main,,0,0,0,,"
+                    f"{{\\pos({center_x},{center_y})\\an2}}"
+                    f"{event['text']}\n"
                 )
                 ass_content += dialogue
         
@@ -925,7 +990,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         with open(ass_file, "w", encoding="utf-8") as f:
             f.write(ass_content)
         
-        print(f"Created clean professional subtitle file at: {ass_file}")
+        print(f"Created fluid karaoke subtitle file at: {ass_file}")
         return ass_file
 
     except Exception as e:
