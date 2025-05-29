@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timedelta
 
 # Import from existing modules
-from video_creator import create_video, create_romanian_video, cleanup_broll, create_user_directory
+from video_creator import create_video, create_romanian_video, cleanup_broll, create_user_directory, create_subtitle_video
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -155,6 +155,12 @@ class VideoRequest(BaseModel):
     voice: str = "gbLy9ep70G3JW53cTzFC"
     language: str = "romanian"  # Default to Romanian for backward compatibility
     selected_brolls: List[str] = []
+
+class SubtitleVideoRequest(BaseModel):
+    script: str
+    music: str = "funny 2.mp3"  # Optional background music
+    language: str = "romanian"  # Still need language for speech recognition
+    session_id: Optional[str] = None
 
 class BrollInfo(BaseModel):
     filename: str
@@ -697,6 +703,233 @@ async def delete_user_brolls(session_id: str, user_id: str = Depends(get_user_id
         raise
     except Exception as e:
         logger.error(f"Error in delete_user_brolls: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/upload-video")
+async def upload_video(file: UploadFile = File(...), user_id: str = Depends(get_user_id)):
+    """Upload a video file for subtitle mode"""
+    # Validate file type - only allow video files
+    allowed_types = ['.mp4', '.mov', '.avi', '.mkv']
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    
+    if file_ext not in allowed_types:
+        raise HTTPException(status_code=400, detail="Invalid file type. Allowed types: MP4, MOV, AVI, MKV")
+    
+    # Generate unique filename and session ID
+    session_id = str(uuid.uuid4())
+    unique_filename = f"uploaded_video_{session_id}{file_ext}"
+    session_dir = get_session_dir(session_id)
+    file_path = session_dir / unique_filename
+    
+    # Save file with progress tracking
+    try:
+        # Get content length if available
+        content_length = int(file.headers.get("content-length", 0))
+        
+        # Create a chunked upload with progress tracking
+        chunk_size = 1024 * 1024  # 1MB chunks
+        total_read = 0
+        progress = 0
+        
+        with open(file_path, "wb") as buffer:
+            # Read file in chunks to track progress
+            while chunk := await file.read(chunk_size):
+                buffer.write(chunk)
+                total_read += len(chunk)
+                
+                # Update progress percentage if content length is known
+                if content_length > 0:
+                    new_progress = int((total_read / content_length) * 100)
+                    if new_progress > progress and new_progress % 10 == 0:  # Log every 10%
+                        progress = new_progress
+                        logger.info(f"Video upload progress for {unique_filename}: {progress}%")
+            
+        logger.info(f"Video upload complete: {unique_filename}, size: {total_read} bytes")
+                
+    except Exception as e:
+        logger.error(f"Failed to save video file: {e}")
+        if file_path.exists():
+            try:
+                os.remove(file_path)
+            except:
+                pass
+        raise HTTPException(status_code=500, detail=f"Failed to save video file: {str(e)}")
+    
+    # Return response with session_id and file info
+    response_data = {
+        "session_id": session_id,
+        "filename": unique_filename,
+        "original_filename": file.filename,
+        "file_path": str(file_path),
+        "size": total_read,
+        "message": "Video uploaded successfully"
+    }
+    
+    return response_data
+
+@app.post("/create-subtitle-video")
+async def create_subtitle_video_endpoint(request: SubtitleVideoRequest, user_id: str = Depends(get_user_id)):
+    """Create a subtitle video by adding subtitles and music to an uploaded video"""
+    try:
+        # Use provided session_id or generate a new one
+        session_id = request.session_id or str(uuid.uuid4())
+        session_dir = get_session_dir(session_id)
+        
+        # Find the uploaded video file in the session directory
+        video_files = list(session_dir.glob("uploaded_video_*"))
+        if not video_files:
+            raise HTTPException(status_code=404, detail="No uploaded video found for this session")
+        
+        # Use the most recent uploaded video
+        video_file_path = max(video_files, key=lambda x: x.stat().st_mtime)
+        
+        # Create a queue for progress messages
+        progress_queue = asyncio.Queue()
+        
+        # Create an initial progress message
+        await progress_queue.put(json.dumps({
+            'status': 'progress',
+            'message': 'Starting subtitle video creation...',
+            'percentage': 0
+        }))
+        
+        # Create an async event generator for SSE
+        async def event_generator():
+            try:
+                logger.info(f"SSE connection established for subtitle video session_id: {session_id}")
+                
+                # First send an initial message to establish the connection
+                message = json.dumps({'status': 'progress', 'message': 'Starting subtitle video creation...', 'percentage': 0})
+                yield f"data: {message}\n\n"
+                await asyncio.sleep(0.01)
+                
+                # Create progress callback
+                main_loop = asyncio.get_event_loop()
+                
+                def progress_callback(message):
+                    # Parse the message for percentage if available
+                    percentage = None
+                    message_text = message
+                    
+                    if '|' in message:
+                        try:
+                            message_text, percentage_str = message.split('|')
+                            percentage = float(percentage_str)
+                            message_text = message_text.strip()
+                            logger.info(f"Subtitle video progress - Message: {message_text}, Percentage: {percentage}")
+                        except Exception as e:
+                            logger.error(f"Error parsing progress message: {message} - Error: {e}")
+                            percentage = None
+                    
+                    # Create progress data
+                    progress_data = {
+                        'status': 'progress',
+                        'message': message_text
+                    }
+                    if percentage is not None:
+                        progress_data['percentage'] = percentage
+                        
+                    # Log the progress data being sent
+                    logger.info(f"Queueing subtitle video progress data: {progress_data}")
+                    
+                    # Put the message in the queue from the background thread
+                    if main_loop.is_running():
+                        main_loop.call_soon_threadsafe(
+                            lambda: asyncio.create_task(
+                                progress_queue.put(json.dumps(progress_data))
+                            )
+                        )
+                
+                # Start subtitle video creation in a background task
+                video_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        create_subtitle_video,
+                        script=request.script,
+                        video_file_path=str(video_file_path),
+                        session_id=session_id,
+                        language=request.language,
+                        selected_music=request.music,
+                        progress_callback=progress_callback
+                    )
+                )
+                
+                # While the video is being created, stream progress updates
+                video_path = None
+                while True:
+                    # Check if video task is done
+                    if video_task.done():
+                        # Get the result (or raise exception if it failed)
+                        video_path = video_task.result()
+                        # We still need to process any remaining messages in the queue
+                        if progress_queue.empty():
+                            break
+                    
+                    try:
+                        # Get message with a short timeout
+                        message = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
+                        logger.info(f"Sending subtitle video SSE message: {message}")
+                        
+                        # Send the message immediately
+                        yield f"data: {message}\n\n"
+                        await asyncio.sleep(0.01)
+                        
+                        # Check if this is a completion message
+                        try:
+                            data = json.loads(message)
+                            if isinstance(data, dict) and "Video creation complete!" in str(data.get('message', '')):
+                                logger.info("Detected subtitle video completion message")
+                        except json.JSONDecodeError:
+                            pass
+                            
+                    except asyncio.TimeoutError:
+                        # No message available, just continue and check video_task again
+                        await asyncio.sleep(0.1)
+                        continue
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing subtitle video message: {e}")
+                        error_msg = json.dumps({'error': str(e)})
+                        yield f"data: {error_msg}\n\n"
+                        await asyncio.sleep(0.01)
+                        raise
+                
+                # Send the final completion message
+                complete_message = json.dumps({
+                    'status': 'complete',
+                    'session_id': session_id,
+                    'video_path': video_path
+                })
+                logger.info(f"Sending subtitle video completion message: {complete_message}")
+                yield f"data: {complete_message}\n\n"
+                await asyncio.sleep(0.01)
+                logger.info(f"Subtitle video SSE connection completed for session_id: {session_id}")
+                    
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Error in subtitle video task: {error_msg}")
+                error_data = json.dumps({'error': error_msg})
+                yield f"data: {error_data}\n\n"
+                await asyncio.sleep(0.01)
+                # Make sure we cancel the video task if it's still running
+                if 'video_task' in locals() and not video_task.done():
+                    video_task.cancel()
+                logger.error(f"Subtitle video SSE connection terminated with error for session_id: {session_id}")
+        
+        # Return the streaming response with SSE
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "Content-Type": "text/event-stream",
+                "X-Accel-Buffering": "no",
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in create_subtitle_video_endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Cleanup task

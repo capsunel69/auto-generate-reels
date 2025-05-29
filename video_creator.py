@@ -113,8 +113,11 @@ def get_word_timestamps_from_google(audio_file_path, language="romanian"):
     language_code = language_map.get(language.lower(), "ro-RO")
     print(f"Using speech recognition language: {language_code}")
 
-    # Convert MP3 to WAV
+    # Convert MP3 to WAV and force to mono
     audio = AudioSegment.from_mp3(audio_file_path)
+    
+    # Convert to mono (single channel) and set sample rate to 16kHz for Google Cloud Speech
+    audio = audio.set_channels(1).set_frame_rate(16000)
     
     # Split audio into 30-second chunks if longer than 1 minute
     chunk_length = 30 * 1000  # 30 seconds in milliseconds
@@ -129,7 +132,7 @@ def get_word_timestamps_from_google(audio_file_path, language="romanian"):
             # Extract chunk
             chunk = audio[start_time:end_time]
             
-            # Export chunk to WAV
+            # Export chunk to WAV (already mono from parent audio)
             wav_data = io.BytesIO()
             chunk.export(wav_data, format="wav")
             wav_data.seek(0)
@@ -139,6 +142,8 @@ def get_word_timestamps_from_google(audio_file_path, language="romanian"):
             audio_input = speech_v1.RecognitionAudio(content=content)
             config = speech_v1.RecognitionConfig(
                 encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
+                sample_rate_hertz=16000,  # Explicitly set sample rate
+                audio_channel_count=1,    # Explicitly set mono
                 language_code=language_code,
                 enable_word_time_offsets=True,
                 enable_automatic_punctuation=True,  # Better punctuation detection
@@ -171,6 +176,8 @@ def get_word_timestamps_from_google(audio_file_path, language="romanian"):
         audio_input = speech_v1.RecognitionAudio(content=content)
         config = speech_v1.RecognitionConfig(
             encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=16000,  # Explicitly set sample rate
+            audio_channel_count=1,    # Explicitly set mono
             language_code=language_code,
             enable_word_time_offsets=True,
             enable_automatic_punctuation=True,
@@ -1475,15 +1482,6 @@ def create_video(script, session_id, language="romanian", selected_music="funny 
                     progress_callback("Rendering video - Processing audio...|82")
                 elif "Writing video" in msg:
                     progress_callback("Rendering video - Processing frames...|85")
-                elif "frame" in msg:
-                    # Extract frame number and total frames
-                    try:
-                        frame_info = msg.split("frame=")[1].split("/")[0].strip()
-                        total_frames = msg.split("frames=")[1].split()[0].strip()
-                        percent = (int(frame_info) / int(total_frames)) * 100
-                        progress_callback(f"Rendering video - Processing frames ({percent:.0f}%)|{85 + (percent * 0.05)}")
-                    except:
-                        progress_callback(msg)
                 elif "Done" in msg:
                     progress_callback("Rendering video - Finalizing...|90")
                 else:
@@ -1586,6 +1584,201 @@ def create_romanian_video(romanian_script, session_id, selected_music="funny 2.m
         progress_callback=progress_callback,
         broll_files=broll_files
     )
+
+def create_subtitle_video(script, video_file_path, session_id, language="romanian", selected_music="funny 2.mp3", progress_callback=None):
+    """Create a video by adding subtitles and optional background music to an existing video file."""
+    try:
+        user_dir, uploads_dir = create_user_directory(session_id)
+        
+        # Generate a unique video ID
+        video_id = str(uuid.uuid4())[:8]
+        
+        # Update all file paths to include session_id to ensure uniqueness
+        extracted_audio_path = os.path.join(user_dir, f"extracted_audio_{session_id}.mp3")
+        srt_path = os.path.join(user_dir, f"sub_file_{session_id}.srt")
+        output_path = os.path.join(user_dir, f"temp_with_audio_{session_id}.mp4")
+        temp_audio_path = os.path.join(user_dir, f"TEMP_MPY_wvf_snd_{session_id}.mp3")
+        final_output = os.path.join(user_dir, f"final_video_{session_id}_{video_id}.mp4")
+
+        # Initialize progress at 0%
+        if progress_callback:
+            progress_callback("Starting subtitle video creation...|0")
+
+        # Load the video and extract its audio
+        if progress_callback:
+            progress_callback("Extracting audio from video...|10")
+        print("Extracting audio from video...")
+        
+        video_clip = VideoFileClip(video_file_path)
+        video_audio = video_clip.audio
+        video_audio.write_audiofile(extracted_audio_path)
+        
+        # Clean the script for better recognition
+        script_info = clean_script_for_tts(script)  # We can reuse this function for cleaning
+        cleaned_script = script_info['text']
+        
+        # Save scripts for reference
+        with open(os.path.join(user_dir, f"original_script_{session_id}.txt"), "w", encoding="utf-8") as f:
+            f.write(script)
+        with open(os.path.join(user_dir, f"cleaned_script_{session_id}.txt"), "w", encoding="utf-8") as f:
+            f.write(cleaned_script)
+
+        if progress_callback:
+            progress_callback("Generating subtitles...|35")
+        print("Generating subtitles...")
+        
+        # Get word-level timestamps from Google Cloud using the video's audio
+        words_with_times = get_word_timestamps_from_google(extracted_audio_path, language)
+        
+        if progress_callback:
+            progress_callback("Processing word timings...|45")
+        
+        # Align the cleaned script with the recognized words
+        aligned_words = align_texts(cleaned_script, words_with_times)
+        
+        if progress_callback:
+            progress_callback("Creating subtitle file...|55")
+        
+        # Create SRT file with aligned words
+        srt_content = create_grouped_srt(aligned_words, max_words=4)
+        
+        # Save the processed SRT file
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write(srt_content)
+            
+        # Save word timing data for word-by-word highlighting
+        words_timing_path = os.path.join(user_dir, f"words_timing_{session_id}.json")
+        with open(words_timing_path, "w", encoding="utf-8") as f:
+            json.dump(aligned_words, f, indent=2)
+
+        if progress_callback:
+            progress_callback("Processing video...|65")
+        print("Processing video...")
+        
+        # Prepare final audio (original audio + optional background music)
+        if selected_music:
+            if progress_callback:
+                progress_callback("Adding background music...|70")
+                
+            # Load and prepare background music
+            bg_music = AudioFileClip(f"music/{selected_music}")
+            
+            # Loop the background music if it's shorter than the video
+            if bg_music.duration < video_audio.duration:
+                num_loops = math.ceil(video_audio.duration / bg_music.duration)
+                bg_music = concatenate_audioclips([bg_music] * num_loops)
+            
+            # Trim background music to match video duration
+            bg_music = bg_music.with_duration(video_audio.duration)
+            
+            # Lower the volume of background music significantly
+            bg_music = bg_music.with_effects([MultiplyVolume(0.15)])  # 15% volume for background
+            
+            # Combine original audio and background music
+            final_audio = CompositeAudioClip([video_audio, bg_music])
+        else:
+            # Use original audio if no background music selected
+            final_audio = video_audio
+
+        # Combine video with final audio
+        video_with_audio = video_clip.with_audio(final_audio)
+
+        # Create SSELogger instance with a proper callback
+        def sse_callback(msg):
+            if progress_callback:
+                if "Building video" in msg:
+                    progress_callback("Rendering video - Preparing...|75")
+                elif "Writing audio" in msg:
+                    progress_callback("Rendering video - Processing audio...|80")
+                elif "Writing video" in msg:
+                    progress_callback("Rendering video - Processing frames...|85")
+                elif "Done" in msg:
+                    progress_callback("Rendering video - Finalizing...|90")
+                else:
+                    progress_callback(msg)
+                
+        sse_logger = SSELogger(sse_callback=sse_callback)
+        
+        if progress_callback:
+            progress_callback("Rendering video with audio...|75")
+        video_with_audio.write_videofile(
+            output_path,
+            fps=30,
+            logger=sse_logger,
+            temp_audiofile=temp_audio_path
+        )
+
+        # Ensure temp audio file is cleaned up
+        if os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+            except Exception as e:
+                print(f"Warning: Could not remove temp audio file: {str(e)}")
+
+        # Add subtitles to the video
+        if os.path.exists(srt_path):
+            if progress_callback:
+                progress_callback("Adding styled subtitles...|90")
+            print("Adding styled subtitles...")
+            ass_file = create_subtitle_clips(srt_path, (video_clip.w, video_clip.h), user_dir)
+            if ass_file and os.path.exists(ass_file):
+                if progress_callback:
+                    progress_callback("Rendering final video with subtitles...|95")
+                final_output = create_styled_subtitles(output_path, ass_file, user_dir, session_id)
+                
+                # Clean up temporary files only after successful creation
+                if os.path.exists(final_output):
+                    try:
+                        os.remove(output_path)  # Remove the non-subtitled version
+                        os.remove(extracted_audio_path)  # Clean up extracted audio
+                    except Exception as e:
+                        print(f"Warning: Could not remove temp files: {str(e)}")
+            else:
+                print("Failed to create subtitle file, using video without subtitles")
+                final_output = output_path
+
+        if progress_callback:
+            progress_callback("Video creation complete!|100")
+        print("Subtitle video creation complete!")
+
+        # Clean up the clip resources before returning
+        if video_clip:
+            video_clip.close()
+        if video_audio:
+            video_audio.close()
+        if final_audio:
+            final_audio.close()
+        if video_with_audio:
+            video_with_audio.close()
+
+        # Optional small delay for Windows to release file handles
+        time.sleep(1)
+
+        return final_output  # Return the path to the final video
+
+    except Exception as e:
+        print(f"Error creating subtitle video: {str(e)}")
+        if progress_callback:
+            progress_callback(f"ERROR: {str(e)}")
+        raise e
+
+    finally:
+        # Cleanup
+        try:
+            if 'video_clip' in locals() and video_clip:
+                video_clip.close()
+            if 'video_audio' in locals() and video_audio:
+                video_audio.close()
+            if 'final_audio' in locals() and final_audio:
+                final_audio.close()
+            if 'video_with_audio' in locals() and video_with_audio:
+                video_with_audio.close()
+        except Exception as e:
+            print(f"Warning: Error during cleanup: {str(e)}")
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
 
 if __name__ == "__main__":
     create_video()
