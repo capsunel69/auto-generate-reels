@@ -184,6 +184,8 @@ async def get_user_info(user_id: str = Depends(get_user_id)):
 def get_music_list():
     music_dir = Path('music')
     music_files = [f.name for f in music_dir.glob('*.mp3')]
+    # Add "No Background Music" option at the beginning
+    music_files.insert(0, "No Background Music")
     return {"music_files": music_files}
 
 @app.get("/languages")

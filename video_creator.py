@@ -1493,24 +1493,32 @@ def create_video(script, session_id, language="romanian", selected_music="funny 
         # Boost voice volume for better clarity and prominence
         voice_audio = voice_audio.with_effects([MultiplyVolume(1.4)])  # 150% of original volume
         
-        # Load and prepare background music using selected music
-        bg_music = AudioFileClip(f"music/{selected_music}")
+        # Initialize bg_music to None
+        bg_music = None
         
-        # Loop the background music if it's shorter than the voice audio
-        if bg_music.duration < voice_audio.duration:
-            num_loops = math.ceil(voice_audio.duration / bg_music.duration)
-            bg_music = concatenate_audioclips([bg_music] * num_loops)
-        
-        # Trim background music to match voice duration (plus small buffer)
-        bg_music = bg_music.with_duration(voice_audio.duration + BUFFER_DURATION)
-        
-        # Lower the volume of background music using MultiplyVolume
-        bg_music = bg_music.with_effects([MultiplyVolume(0.15)])  # Reduced to 8% to give more space for boosted voice
-        
-        # Combine voice and background music
-        final_audio = CompositeAudioClip([voice_audio, bg_music])
+        # Handle background music
+        if selected_music and selected_music != "No Background Music":
+            # Load and prepare background music using selected music
+            bg_music = AudioFileClip(f"music/{selected_music}")
+            
+            # Loop the background music if it's shorter than the voice audio
+            if bg_music.duration < voice_audio.duration:
+                num_loops = math.ceil(voice_audio.duration / bg_music.duration)
+                bg_music = concatenate_audioclips([bg_music] * num_loops)
+            
+            # Trim background music to match voice duration (plus small buffer)
+            bg_music = bg_music.with_duration(voice_audio.duration + BUFFER_DURATION)
+            
+            # Lower the volume of background music using MultiplyVolume
+            bg_music = bg_music.with_effects([MultiplyVolume(0.15)])  # Reduced to 8% to give more space for boosted voice
+            
+            # Combine voice and background music
+            final_audio = CompositeAudioClip([voice_audio, bg_music])
+        else:
+            # Use only voice audio if no background music selected
+            final_audio = voice_audio
 
-        # Use combined audio instead of just voice audio
+        # Use final audio (with or without background music)
         final_clip = final_clip.with_audio(final_audio)
 
         # Create SSELogger instance with a proper callback
@@ -1695,8 +1703,11 @@ def create_subtitle_video(script, video_file_path, session_id, language="romania
             progress_callback("Processing video...|65")
         print("Processing video...")
         
+        # Initialize bg_music to None
+        bg_music = None
+        
         # Prepare final audio (original audio + optional background music)
-        if selected_music:
+        if selected_music and selected_music != "No Background Music":
             if progress_callback:
                 progress_callback("Adding background music...|70")
                 
@@ -1786,6 +1797,8 @@ def create_subtitle_video(script, video_file_path, session_id, language="romania
             video_clip.close()
         if video_audio:
             video_audio.close()
+        if bg_music:
+            bg_music.close()
         if final_audio:
             final_audio.close()
         if video_with_audio:
@@ -1809,6 +1822,8 @@ def create_subtitle_video(script, video_file_path, session_id, language="romania
                 video_clip.close()
             if 'video_audio' in locals() and video_audio:
                 video_audio.close()
+            if 'bg_music' in locals() and bg_music:
+                bg_music.close()
             if 'final_audio' in locals() and final_audio:
                 final_audio.close()
             if 'video_with_audio' in locals() and video_with_audio:
